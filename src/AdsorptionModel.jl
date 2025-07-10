@@ -236,6 +236,7 @@ function adsorption_equations!(du, u, params, t)
     ψ    = (R * T₀ * qₛ₀) / Pₕ * (1 - ε) / ε * ρₛ
     Σxᵢ  = sum(x[i] for i in keys(x))
     Ω₁   = (K_gas / (v₀ * ε * L)) ./ ((1 - ε) / ε * (ρₛ * Cₚₛ .+ qₛ₀ * Cₚ_ads * Σxᵢ))
+    Ω₂   = ((Cₚ_gas / R) * (P₀ / T₀)) ./ ((1 - ε) / ε * (ρₛ * Cₚₛ .+ qₛ₀ * Cₚ_ads * Σxᵢ))
 
     # @show P₀
     # @show Cₚ_gas
@@ -247,9 +248,9 @@ function adsorption_equations!(du, u, params, t)
     # @show qₛ₀
     # @show Cₚ_ads
     # @show Σxᵢ
+    # @show Ω₂
     # throw(ErrorException("hey"))
 
-    Ω₂   = ((Cₚ_gas / R) * (P₀ / T₀)) ./ ((1 - ε) / ε * (ρₛ * Cₚₛ .+ qₛ₀ * Cₚ_ads * Σxᵢ))
     Ω₃   = (Cₚ_ads * qₛ₀) ./ (ρₛ * Cₚₛ .+ qₛ₀ * Cₚ_ads * Σxᵢ)
     Ω₄   = (2h_in / r_in) * (L / v₀) ./ ((1 - ε) * (ρₛ * Cₚₛ .+ qₛ₀ * Cₚ_ads * Σxᵢ))
     σ    = Dict(
@@ -301,43 +302,6 @@ function adsorption_equations!(du, u, params, t)
     dx["N₂"]      .= 0
 
     #────────────────────────────────────────────
-    # Component mass balance equations
-    #────────────────────────────────────────────
-    for component in ["CO₂", "N₂", "H₂O"]
-        yᵢ       = y[component]
-        dyᵢ      = dy[component]
-        dxᵢ      = dx[component]
-
-        # Compute yᵢ at cell faces using WENO
-        yᵢ_zf    = similar(yᵢ, N + 1)
-        yᵢ_feed  = y_feed[component]
-        yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
-        yᵢ_right = yᵢ[N]
-        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right)
-
-        yᵢ_flux = yᵢ_zf .* (P̅_zf ./ T̅_zf) .* v̅_zf
-
-        for j in 1:N
-            # BC for diffusion term
-            if j == 1
-                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
-                                                - P̅_zf[j] / T̅_zf[j] * (-Pe * (yᵢ_feed - yᵢ_left)))
-            elseif j == N
-                diffusion = 1/ΔZ * (0 - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
-            else
-                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
-                                                - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
-            end
-
-            dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                        - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                        - ψ * T̅[j]/P̅[j] * dxᵢ[j] - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
-            dyᵢ[j] = 0
-        end
-    end
-
-
-    #────────────────────────────────────────────
     # Column energy balance equation
     #────────────────────────────────────────────
     T̅_flux = v̅_zf .* P̅_zf
@@ -370,6 +334,42 @@ function adsorption_equations!(du, u, params, t)
     for j in 1:N
         Σdxⱼ  = sum(dx[i][j] for i in keys(dx))
         dP̅[j] = - T̅[j] / ΔZ * (P̅_flux[j+1] - P̅_flux[j]) - ψ * T̅[j] * Σdxⱼ + P̅[j]/T̅[j] * dT̅[j]
+    end
+
+    #────────────────────────────────────────────
+    # Component mass balance equations
+    #────────────────────────────────────────────
+    for component in ["CO₂", "N₂", "H₂O"]
+        yᵢ       = y[component]
+        dyᵢ      = dy[component]
+        dxᵢ      = dx[component]
+
+        # Compute yᵢ at cell faces using WENO
+        yᵢ_zf    = similar(yᵢ, N + 1)
+        yᵢ_feed  = y_feed[component]
+        yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
+        yᵢ_right = yᵢ[N]
+        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right)
+
+        yᵢ_flux = yᵢ_zf .* (P̅_zf ./ T̅_zf) .* v̅_zf
+
+        for j in 1:N
+            # BC for diffusion term
+            if j == 1
+                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
+                                                - P̅_zf[j] / T̅_zf[j] * (-Pe * (yᵢ_feed - yᵢ_left)))
+            elseif j == N
+                diffusion = 1/ΔZ * (0 - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
+            else
+                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
+                                                - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
+            end
+
+            dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
+                        - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
+                        - ψ * T̅[j]/P̅[j] * dxᵢ[j] - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
+            # dyᵢ[j] = 0
+        end
     end
 
     #────────────────────────────────────────────
