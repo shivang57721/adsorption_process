@@ -1,23 +1,3 @@
-module IsothermModel
-
-export IsothermParams
-
-Base.@kwdef struct IsothermParams
-    T₀::Float64
-    nₛ₀::Float64
-    b₀::Float64
-    t₀::Float64
-    ΔH₀::Float64
-    χ::Float64
-    γ_iso::Float64
-    β::Float64
-    c_G::Float64
-    K_ads::Float64
-    cₘ::Float64
-    R::Float64
-    α::Float64
-end
-
 function q_star_H₂O(T, P_H₂O, params)
     c_G     = params.c_G
     K_ads   = params.K_ads
@@ -50,6 +30,4 @@ function q_star_CO₂(T, P_CO₂, q_H₂O, params)
     base = max(b(T) * P_CO₂, 0)
     val = nₛ(T) * (b(T) * P_CO₂) / (1 + base^t(T))^(1/t(T))
     return isnan(val) ? 0 : val
-end
-
 end
