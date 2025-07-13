@@ -22,7 +22,7 @@ N = 100
 
 params = AdsorptionParams(
     N = N,
-    L = 0.1,
+    L = 1,
     r_in = 0.1445,
     r_out = 0.1620,
     ε = 0.37,
@@ -79,6 +79,7 @@ params.buffers["σ_N₂"] = zeros(N)
 
 params.buffers["P̅_zf"] = zeros(N+1)
 params.buffers["T̅_zf"] = zeros(N+1)
+params.buffers["v̅_zf"] = zeros(N+1)
 params.buffers["T̅_flux"] = zeros(N+1)
 params.buffers["P̅_flux"] = zeros(N+1)
 params.buffers["y_flux"] = zeros(N+1)

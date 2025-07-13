@@ -1,12 +1,13 @@
 """
-Semi-discretization of transport equations for adsorption modelling
+DAE formulation of transport equations for adsorption modelling
+This formulation includes algebraic constraints for y_N₂ normalization and velocity computation.
 """
-module AdsorptionModel
-export adsorption_equations!
+module AdsorptionModelDAE
+export adsorption_dae!, setup_dae_initial_conditions
 
 include("util.jl")
 
-function adsorption_equations!(du, u, params, t)
+function adsorption_dae!(res, du, u, params, t)
     #────────────────────────────────────────────
     # Unpack parameters
     #────────────────────────────────────────────
@@ -75,7 +76,7 @@ function adsorption_equations!(du, u, params, t)
     k_CO₂      = params.k_CO₂
     k_H₂O      = params.k_H₂O
 
-    # Unpack buffers
+    # Buffers
     μ = params.buffers["μ"]
     ρ_gas = params.buffers["ρ_gas"]
     Σxᵢ = params.buffers["Σxᵢ"]
@@ -89,36 +90,62 @@ function adsorption_equations!(du, u, params, t)
     σ_N₂ = params.buffers["σ_N₂"]
 
     #────────────────────────────────────────────
-    # Unpack u, du and res
+    # State vector layout for DAE:
+    # Differential variables (du != 0): [y_CO₂, y_H₂O, x_CO₂, x_H₂O, P̅, T̅, T̅_wall]
+    # Algebraic variables (du = 0):     [y_N₂, v̅]
+    # Note: x_N₂ eliminated since dx_N₂ = 0 everywhere
     #────────────────────────────────────────────
-    # Unpack u
-    y_CO₂  = @view u[1:N]
-    y_N₂   = @view u[N+1:2N]
-    y_H₂O  = @view u[2N+1:3N]
-    x_CO₂  = @view u[3N+1:4N]
-    x_H₂O  = @view u[4N+1:5N]
-    P̅      = @view u[5N+1:6N]
-    T̅      = @view u[6N+1:7N]
-    T̅_wall = @view u[7N+1:8N]
     
-    # x_N₂ is implicitly zero everywhere (removed from state vector)
-
-    # Unpack du
-    dy_CO₂  = @view du[1:N]
-    dy_N₂   = @view du[N+1:2N]
-    dy_H₂O  = @view du[2N+1:3N]
-    dx_CO₂  = @view du[3N+1:4N]
-    dx_H₂O  = @view du[4N+1:5N]
-    dP̅      = @view du[5N+1:6N]
-    dT̅      = @view du[6N+1:7N]
-    dT̅_wall = @view du[7N+1:8N]
+    # Differential variable indices
+    y_CO₂_idx = 1:N
+    y_H₂O_idx = N+1:2N
+    x_CO₂_idx = 2N+1:3N
+    x_H₂O_idx = 3N+1:4N
+    P̅_idx = 4N+1:5N
+    T̅_idx = 5N+1:6N
+    T̅_wall_idx = 6N+1:7N
     
-    # dx_N₂ is implicitly zero everywhere (removed from state vector)
+    # Algebraic variable indices
+    y_N₂_idx = 7N+1:8N         # y_N₂ (algebraic)
+    v̅_idx = 8N+1:8N+(N+1)      # v̅ at faces (algebraic)
 
-    # μ and ρ_gas
-    @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂ # viscosity in each cell
-    @. ρ_gas = P₀ / (R * T_feed) * (y_CO₂ * 44.009 + y_H₂O * 18.01528 + y_N₂ * 28.0134) * 1e-3 # gas density in each cell
+    # Extract state variables
+    y_CO₂  = @view u[y_CO₂_idx]
+    y_H₂O  = @view u[y_H₂O_idx]
+    x_CO₂  = @view u[x_CO₂_idx]
+    x_H₂O  = @view u[x_H₂O_idx]
+    P̅      = @view u[P̅_idx]
+    T̅      = @view u[T̅_idx]
+    T̅_wall = @view u[T̅_wall_idx]
+    y_N₂   = @view u[y_N₂_idx]      # Algebraic
+    v̅_zf   = @view u[v̅_idx]        # Algebraic
+    
+    # x_N₂ is implicitly zero everywhere (not stored in state vector)
 
+    # Extract residuals
+    res_y_CO₂  = @view res[y_CO₂_idx]
+    res_y_H₂O  = @view res[y_H₂O_idx]
+    res_x_CO₂  = @view res[x_CO₂_idx]
+    res_x_H₂O  = @view res[x_H₂O_idx]
+    res_P̅      = @view res[P̅_idx]
+    res_T̅      = @view res[T̅_idx]
+    res_T̅_wall = @view res[T̅_wall_idx]
+    res_y_N₂   = @view res[y_N₂_idx]    # Algebraic constraint
+    res_v̅      = @view res[v̅_idx]      # Algebraic constraint
+
+    # Extract derivatives (only for differential variables)
+    dy_CO₂  = @view du[y_CO₂_idx]
+    dy_H₂O  = @view du[y_H₂O_idx]
+    dx_CO₂  = @view du[x_CO₂_idx]
+    dx_H₂O  = @view du[x_H₂O_idx]
+    dP̅      = @view du[P̅_idx]
+    dT̅      = @view du[T̅_idx]
+    dT̅_wall = @view du[T̅_wall_idx]
+
+    #────────────────────────────────────────────
+    # Compute auxiliary variables
+    #────────────────────────────────────────────
+    
     # Dimensionless groups
     Pe   = v₀ * L / Dₗ                                       # Peclet number
     Peₕ  = (ε * v₀ * L) / (K_gas / (ρ_gas[1] * Cₚ_gas))      # Heat Peclet number
@@ -135,18 +162,9 @@ function adsorption_equations!(du, u, params, t)
     Π₂   = 2r_in * h_in / (r_out^2 - r_in^2) * L / (ρ_wall * Cₚ_wall * v₀)
     Π₃   = 2r_out * h_out / (r_out^2 - r_in^2) * L / (ρ_wall * Cₚ_wall * v₀)
 
-    """ !info!
-    _zf means value at the cell faces. zf[j] is the value at j - 1/2
-    _left means boundary condition at Z=0
-    _right means boundary condition at Z=1
-    """
-
-    # Compute local velcoity at cell boundaries
-    v̅_zf = compute_velocity(P̅; y_CO₂, y_H₂O, y_N₂, params, t)
-
-    # Compute P̅ and T̅ and y at cell faces using WENO
+    # Compute P̅ and T̅ at cell faces using WENO
     P̅_zf = params.buffers["P̅_zf"]
-    P̅_left = P̅[1] + (150μ[1] * (ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[1] + 1.75 * (ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v̅_zf[1] * abs(v̅_zf[1])) * (L * v₀ / P₀)
+    P̅_left = P̅[1] + (150μ[1] * (ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v₀ + 1.75 * (ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v₀ * abs(v₀)) / P₀
     P̅_right = 1
     WENO!(P̅_zf, P̅, P̅_left, P̅_right)
 
@@ -154,24 +172,50 @@ function adsorption_equations!(du, u, params, t)
     T̅_left = (T̅[1] + Peₕ * ΔZ/2) / (1 + Peₕ * ΔZ/2)
     T̅_right = T̅[N]
     WENO!(T̅_zf, T̅, T̅_left, T̅_right)
+
+    #────────────────────────────────────────────
+    # Algebraic constraints
+    #────────────────────────────────────────────
+    
+    # Constraint 1: y_CO₂ + y_H₂O + y_N₂ = 1
+    @. res_y_N₂ = y_N₂ - (1.0 - y_CO₂ - y_H₂O)
+    
+    # Constraint 2: Velocity from simplified Ergun equation
+    # μ and ρ_gas computation (needed for velocity)
+    @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂
+    @. ρ_gas = P₀ / (R * T_feed) * (y_CO₂ * 44.009 + y_H₂O * 18.01528 + y_N₂ * 28.0134) * 1e-3
+    
+    # Boundary condition for velocity (dimensionless)
+    res_v̅[1] = v̅_zf[1] - 1.0
+    
+    # Velocity constraints using Ergun equation
+    @inbounds for j in 1:N
+        if j == N
+            ΔPΔZ = P₀ * (1.0 - P̅[j]) / (ΔZ/2)  # P̅_right = 1
+        else 
+            ΔPΔZ = P₀ * (P̅[j+1] - P̅[j]) / ΔZ
+        end
+        
+        # Ergun equation: ΔP/ΔZ = 150μ/(4rₚ²) * (1-ε)²/ε² * v + 1.75ρ/(2rₚ) * (1-ε)/ε * v|v|
+        # Rearranged as residual: ΔPΔZ - (viscous term) - (inertial term) = 0
+        res_v̅[j+1] = ΔPΔZ - (150 * μ[j]) / (4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[j+1] - 
+                          1.75 * ρ_gas[j] / (2rₚ) * (1 - ε) / ε * v̅_zf[j+1] * abs(v̅_zf[j+1])
+    end
     
     #────────────────────────────────────────────
-    # Solid phase mass balance equations
+    # Differential equations (residual form: res = du - f(u))
     #────────────────────────────────────────────
 
+    #────────────────────────────────────────────
+    # Solid phase mass balance equation
+    #────────────────────────────────────────────
     # H₂O
-    q_H₂O_star     = q_star_H₂O.(T₀ * T̅, P₀ * P̅ .* y_H₂O) # Apply to temperature and partial pressure
-    x_H₂O_star     = q_H₂O_star / qₛ₀
-    α_H₂O          = k_H₂O * L / v₀
-    @. dx_H₂O      = α_H₂O * (x_H₂O_star - x_H₂O)
+    α_H₂O        = k_H₂O * L / v₀
+    @. res_x_H₂O = dx_H₂O - α_H₂O * (q_star_H₂O.(T₀ * T̅, P₀ * P̅ .* y_H₂O) / qₛ₀ - x_H₂O)
 
     # CO₂
-    q_CO₂_star  = q_star_CO₂.(T₀ * T̅, P₀ * P̅ .* y_CO₂, x_H₂O * qₛ₀)
-    x_CO₂_star     = q_CO₂_star / qₛ₀
-    α_CO₂          = k_CO₂ * L / v₀
-    @. dx_CO₂      = α_CO₂ * (x_CO₂_star - x_CO₂)
-
-    # N₂ - removed since x_N₂ = 0 and dx_N₂ = 0 everywhere
+    α_CO₂        = k_CO₂ * L / v₀
+    @. res_x_CO₂ = dx_CO₂ - α_CO₂ * (q_star_CO₂.(T₀ * T̅, P₀ * P̅ .* y_CO₂, x_H₂O * qₛ₀) / qₛ₀ - x_CO₂)
 
     #────────────────────────────────────────────
     # Column energy balance equation
@@ -189,15 +233,17 @@ function adsorption_equations!(du, u, params, t)
             diffusion = 1/ΔZ * ((T̅[j+1] - T̅[j])/ΔZ - (T̅[j] - T̅[j-1])/ΔZ)
         end
 
-        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]  # dx_N₂[j] = 0, so omitted
-        Σσⱼdxⱼ = σ_CO₂[j] * dx_CO₂[j] + σ_H₂O[j] * dx_H₂O[j]  # σ_N₂[j] * dx_N₂[j] = 0, so omitted
+        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]
+        Σσⱼdxⱼ = σ_CO₂[j] * dx_CO₂[j] + σ_H₂O[j] * dx_H₂O[j]
 
-        dT̅[j]     = Ω₁[j] * diffusion +
-                    - Ω₂[j] * 1/ΔZ * (T̅_flux[j+1] - T̅_flux[j]) +
-                    - Ω₃[j] * T̅[j] * Σdxⱼ + 
-                    + Σσⱼdxⱼ +
-                    - Ω₄[j] * (T̅[j] - T̅_wall[j])
-                    - Ω₂[j] * dP̅[j]
+        dT̅_computed = Ω₁[j] * diffusion +
+                      - Ω₂[j] * 1/ΔZ * (T̅_flux[j+1] - T̅_flux[j]) +
+                      - Ω₃[j] * T̅[j] * Σdxⱼ + 
+                      + Σσⱼdxⱼ +
+                      - Ω₄[j] * (T̅[j] - T̅_wall[j]) +
+                      - Ω₂[j] * dP̅[j]
+        
+        res_T̅[j] = dT̅[j] - dT̅_computed
     end
 
     #────────────────────────────────────────────
@@ -206,35 +252,31 @@ function adsorption_equations!(du, u, params, t)
     P̅_flux = params.buffers["P̅_flux"]
     @. P̅_flux = (P̅_zf / T̅_zf) * v̅_zf
     @inbounds for j in 1:N
-        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]  # dx_N₂[j] = 0, so omitted
-        dP̅[j] = - T̅[j] / ΔZ * (P̅_flux[j+1] - P̅_flux[j]) - ψ * T̅[j] * Σdxⱼ + P̅[j]/T̅[j] * dT̅[j]
+        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j] 
+        dP̅_computed = - T̅[j] / ΔZ * (P̅_flux[j+1] - P̅_flux[j]) - ψ * T̅[j] * Σdxⱼ + P̅[j]/T̅[j] * dT̅[j]
+        res_P̅[j] = dP̅[j] - dP̅_computed
     end
 
     #────────────────────────────────────────────
-    # Component mass balance equations
+    # Component mass balance equations (only CO₂ and H₂O as differential)
     #────────────────────────────────────────────
-    y_vars  = (y_CO₂, y_N₂, y_H₂O)
-    dy_vars = (dy_CO₂, dy_N₂, dy_H₂O)
-    dx_vars = (dx_CO₂, nothing, dx_H₂O)  # dx_N₂ = 0, so use nothing as placeholder
-    y_feed_vals = (y_feed_CO₂, y_feed_N₂, y_feed_H₂O)
+    y_vars  = (y_CO₂, y_H₂O)
+    res_y_vars = (res_y_CO₂, res_y_H₂O)
+    dy_vars = (dy_CO₂, dy_H₂O)
+    dx_vars = (dx_CO₂, dx_H₂O)
+    y_feed_vals = (y_feed_CO₂, y_feed_H₂O)
 
     yᵢ_flux = params.buffers["y_flux"]
 
-    @inbounds for i in 1:3  # 1:CO₂, 2:N₂, 3:H₂O
+    @inbounds for i in 1:2  # 1:CO₂, 2:H₂O (N₂ is algebraic)
         yᵢ       = y_vars[i]
+        res_yᵢ   = res_y_vars[i]
         dyᵢ      = dy_vars[i]
         dxᵢ      = dx_vars[i]
         yᵢ_feed  = y_feed_vals[i]
 
-        # Skip adsorption term for N₂ since dx_N₂ = 0
-        if i == 2  # N₂ component
-            dx_term = 0.0
-        else
-            dx_term = dxᵢ
-        end
-
         # Compute yᵢ at cell faces using WENO
-        yᵢ_zf    = params.buffers["P̅_zf"]  # Reuse this buffer since we're done with P̅_zf computation
+        yᵢ_zf    = similar(yᵢ, N + 1)
         yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
         yᵢ_right = yᵢ[N]
         WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right; clamp_result=true)
@@ -253,18 +295,13 @@ function adsorption_equations!(du, u, params, t)
                                                 - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
             end
 
-            if i == 2  # N₂ component
-                dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                            - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                            - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]  # No adsorption term
-            else
-                dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                            - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                            - ψ * T̅[j]/P̅[j] * dx_term[j] - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
-            end
+            dyᵢ_computed = 1/Pe * T̅[j]/P̅[j] * diffusion +
+                          - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
+                          - ψ * T̅[j]/P̅[j] * dxᵢ[j] - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
+            
+            res_yᵢ[j] = dyᵢ[j] - dyᵢ_computed
         end
     end
-
     #────────────────────────────────────────────
     # Wall energy balance equation
     #────────────────────────────────────────────
@@ -278,9 +315,61 @@ function adsorption_equations!(du, u, params, t)
             diffusion = 1/ΔZ * ((T̅_wall[j+1] - T̅_wall[j])/ΔZ - (T̅_wall[j] - T̅_wall[j-1])/ΔZ)
         end
 
-        dT̅_wall[j] = Π₁ * diffusion + Π₂ * (T̅[j] - T̅_wall[j]) - Π₃ * (T̅_wall[j] - T̅ₐ)
+        dT̅_wall_computed = Π₁ * diffusion + Π₂ * (T̅[j] - T̅_wall[j]) - Π₃ * (T̅_wall[j] - T̅ₐ)
+        res_T̅_wall[j] = dT̅_wall[j] - dT̅_wall_computed
     end
 
+    return nothing
+end
+
+function setup_dae_initial_conditions(N, y0_CO₂, y0_H₂O, x0_CO₂, x0_H₂O, P̅0, T̅0, T̅_wall0, params)
+    """
+    Setup initial conditions for DAE formulation
+    Returns u0, du0, and differential_vars vector
+    Note: x_N₂ eliminated since it's zero everywhere
+    """
+    
+    # State vector size
+    n_diff = 7*N        # y_CO₂, y_H₂O, x_CO₂, x_H₂O, P̅, T̅, T̅_wall (x_N₂ eliminated)
+    n_alg = N + (N+1)   # y_N₂, v̅
+    n_total = n_diff + n_alg
+    
+    # Initialize state vector
+    u0 = zeros(n_total)
+    du0 = zeros(n_total)    
+    
+    # Differential variables
+    u0[1:N] = y0_CO₂
+    u0[N+1:2N] = y0_H₂O
+    u0[2N+1:3N] = x0_CO₂
+    u0[3N+1:4N] = x0_H₂O
+    u0[4N+1:5N] = P̅0
+    u0[5N+1:6N] = T̅0
+    u0[6N+1:7N] = T̅_wall0
+    
+    # Algebraic variables (initial guess)
+    u0[7N+1:8N] = 1.0 .- y0_CO₂ .- y0_H₂O  # y_N₂ = 1 - y_CO₂ - y_H₂O
+    u0[8N+1] = 1.0
+    u0[8N+2:8N+(N+1)] = fill(0.0, N)  # Initial velocity guess
+
+    # Fix du0
+    res = similar(u0)
+    adsorption_dae!(res, du0, u0, params, 0)
+    du0[4N+1] = -res[4N+1]
+    adsorption_dae!(res, du0, u0, params, 0)
+    du0[1] = - res[1]
+    du0[N+1] = -res[N+1]
+    du0[5N+1] = -res[5N+1]
+    du0[4N+1] += -res[4N+1]
+
+    
+    # Differential_vars: true for differential, false for algebraic
+    differential_vars = vcat(
+        fill(true, n_diff),   # Differential variables
+        fill(false, n_alg)    # Algebraic variables
+    )
+    
+    return u0, du0, differential_vars
 end
 
 end
