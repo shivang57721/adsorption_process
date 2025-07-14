@@ -22,7 +22,7 @@ x0_CO₂  = fill(0, N)
 # x0_N₂ removed since it's always zero
 x0_H₂O  = fill(0, N)
 P̅0      = fill(1.0, N)
-T̅0      = fill(1.0, N)
+T̅0      = fill(0.95, N)
 T̅_wall0 = fill(1.0, N)
 
 u0 = vcat(y0_CO₂, y0_N₂, y0_H₂O,
@@ -38,7 +38,7 @@ prob = ODEProblem(adsorption_equations!, u0, tspan, params)
             saveat = 0.01,
             verbose = true,
             dtmin = 1e-12,
-            isoutofdomain = (u,p,t) -> minimum(u) < 0)
+            isoutofdomain = (u,p,t) -> minimum(u) < -1e-12)
 
 # Unpack sol
 y_CO₂  = t -> sol(t)[1:N]
@@ -57,11 +57,11 @@ v̅_zf   = t -> begin
     buffer
 end
 
-plot(P̅(200), title="pressure")
-plot(v̅_zf(0.5), title="velocity")
-plot(T̅(200), title="temperature")
+plot(P̅(100), title="pressure")
+plot(v̅_zf(200), title="velocity")
+plot(T̅(10), title="temperature")
 
-plot(y_CO₂(0.1), title="y_CO₂")
+plot(y_CO₂(0.9), title="y_CO₂")
 
 
 plot(y_H₂O(10), title="y_H₂O")

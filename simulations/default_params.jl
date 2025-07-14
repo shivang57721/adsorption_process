@@ -84,8 +84,3 @@ params.buffers["y_zf"] = zeros(N+1)
 params.buffers["T̅_flux"] = zeros(N+1)
 params.buffers["P̅_flux"] = zeros(N+1)
 params.buffers["y_flux"] = zeros(N+1)
-
-params.buffers["dT̅_prev"] = zeros(N)
-params.buffers["dP̅_prev"] = zeros(N)
-params.buffers["dx_CO₂_prev"] = zeros(N)
-params.buffers["dx_H₂O_prev"] = zeros(N)

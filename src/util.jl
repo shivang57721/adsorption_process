@@ -64,13 +64,6 @@ function compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅
             ΔPΔZ = P₀ / L * (P̅[j+1] - P̅[j]) / ΔZ
         end
 
-        if b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ < 0
-            v̅_zf[j+1] = 0.0
-        else
-            v̅_zf[j+1] = - 1/2 * sign(ΔPΔZ) * (-b[j] + sqrt(b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ)) / (ε * v₀)
-            v̅_zf[j+1] = max(v̅_zf[j+1], 0.0)
-        end
-
-        # v̅_zf[j+1] = - ΔPΔZ * 4/150 * ε^2 / (1 - ε^2) * rₚ^2 / (μ[j] * v₀)
+        v̅_zf[j+1] = - 1/2 * sign(ΔPΔZ) * (-b[j] + sqrt(b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ)) / (ε * v₀)
     end
 end

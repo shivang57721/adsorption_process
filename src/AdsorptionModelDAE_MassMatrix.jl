@@ -1,10 +1,13 @@
 """
 Semi-discretization of transport equations for adsorption modelling
+Mass Matrix DAE formulation
+https://docs.sciml.ai/DiffEqDocs/stable/tutorials/dae_example/#Mass-Matrix-Differential-Algebraic-Equations-(DAEs)
 """
 
 include("util.jl")
 
-function adsorption_equations!(du, u, params, t)
+# M * du = f(u, params, t)
+function adsorption_mass_matrix!(du, u, params, t)
     #────────────────────────────────────────────
     # Unpack parameters
     #────────────────────────────────────────────
@@ -153,92 +156,22 @@ function adsorption_equations!(du, u, params, t)
     WENO!(T̅_zf, T̅, T̅_left, T̅_right)
 
     #────────────────────────────────────────────
-    # Column energy balance equation
+    # 1. SOLID PHASE MASS BALANCE EQUATIONS
     #────────────────────────────────────────────
-    T̅_flux = params.buffers["T̅_flux"]
-    @. T̅_flux = v̅_zf * P̅_zf
+    # H₂O
+    q_H₂O_star     = q_star_H₂O.(T₀ * T̅, P₀ * P̅ .* y_H₂O)
+    x_H₂O_star     = q_H₂O_star / qₛ₀
+    α_H₂O          = k_H₂O * L / v₀
+    @. dx_H₂O      = α_H₂O * (x_H₂O_star - x_H₂O)
 
-    @inbounds for j in 1:N
-        # BC for diffusion term
-        if j == 1
-            diffusion = 1/ΔZ * ((T̅[j+1] - T̅[j])/ΔZ - (-Peₕ * (T̅_feed - T̅_left)))
-        elseif j == N
-            diffusion = 1/ΔZ * (0 - (T̅[j] - T̅[j-1])/ΔZ)
-        else
-            diffusion = 1/ΔZ * ((T̅[j+1] - T̅[j])/ΔZ - (T̅[j] - T̅[j-1])/ΔZ)
-        end
-
-        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]
-        Σσⱼdxⱼ = σ_CO₂[j] * dx_CO₂[j] + σ_H₂O[j] * dx_H₂O[j]
-
-        dT̅[j]     = Ω₁[j] * diffusion +
-                    - Ω₂[j] * 1/ΔZ * (T̅_flux[j+1] - T̅_flux[j]) +
-                    - Ω₃[j] * T̅[j] * Σdxⱼ + 
-                    + Σσⱼdxⱼ +
-                    - Ω₄[j] * (T̅[j] - T̅_wall[j])
-                    - Ω₂[j] * dP̅[j]
-    end
+    # CO₂
+    q_CO₂_star  = q_star_CO₂.(T₀ * T̅, P₀ * P̅ .* y_CO₂, x_H₂O * qₛ₀)
+    x_CO₂_star     = q_CO₂_star / qₛ₀
+    α_CO₂          = k_CO₂ * L / v₀
+    @. dx_CO₂      = α_CO₂ * (x_CO₂_star - x_CO₂)
 
     #────────────────────────────────────────────
-    # Total mass balance equation
-    #────────────────────────────────────────────
-    P̅_flux = params.buffers["P̅_flux"]
-    @. P̅_flux = (P̅_zf / T̅_zf) * v̅_zf
-    @inbounds for j in 1:N
-        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]
-        dP̅[j] = - T̅[j] / ΔZ * (P̅_flux[j+1] - P̅_flux[j]) - ψ * T̅[j] * Σdxⱼ + P̅[j]/T̅[j] * dT̅[j]
-    end
-
-    #────────────────────────────────────────────
-    # Component mass balance equations
-    #────────────────────────────────────────────
-    y_vars  = (y_CO₂, y_N₂, y_H₂O)
-    dy_vars = (dy_CO₂, dy_N₂, dy_H₂O)
-    dx_vars = (dx_CO₂, nothing, dx_H₂O)  # dx_N₂ = 0, so use nothing as placeholder
-    y_feed_vals = (y_feed_CO₂, y_feed_N₂, y_feed_H₂O)
-
-    yᵢ_flux = params.buffers["y_flux"]
-
-    @inbounds for i in 1:3  # 1:CO₂, 2:N₂, 3:H₂O
-        yᵢ       = y_vars[i]
-        dyᵢ      = dy_vars[i]
-        dxᵢ      = dx_vars[i]
-        yᵢ_feed  = y_feed_vals[i]
-
-        # Compute yᵢ at cell faces using WENO
-        yᵢ_zf    = params.buffers["y_zf"]
-        yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
-        yᵢ_right = yᵢ[N]
-        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right; clamp_result=true)
-
-        @. yᵢ_flux = yᵢ_zf * (P̅_zf / T̅_zf) * v̅_zf
-
-        @inbounds for j in 1:N
-            # BC for diffusion term
-            if j == 1
-                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
-                                                - P̅_zf[j] / T̅_zf[j] * (-Pe * (yᵢ_feed - yᵢ_left)))
-            elseif j == N
-                diffusion = 1/ΔZ * (0 - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
-            else
-                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
-                                                - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
-            end
-
-            if i == 2  # N₂ component
-                dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                            - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                            - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
-            else
-                dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                            - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                            - ψ * T̅[j]/P̅[j] * dxᵢ[j] - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
-            end
-        end
-    end
-
-    #────────────────────────────────────────────
-    # Wall energy balance equation
+    # 2. WALL ENERGY BALANCE
     #────────────────────────────────────────────
     @inbounds for j in 1:N
         if j == 1
@@ -251,4 +184,5 @@ function adsorption_equations!(du, u, params, t)
 
         dT̅_wall[j] = Π₁ * diffusion + Π₂ * (T̅[j] - T̅_wall[j]) - Π₃ * (T̅_wall[j] - T̅ₐ)
     end
+
 end
