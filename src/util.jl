@@ -30,7 +30,7 @@ function WENO!(f_zf, f, f_left, f_right; clamp_result=false)
 end
 
 # Computes velocity from pressure drop using Ergun's equation
-function compute_velocity(P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅_right=1)
+function compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅_right=1)
     # Computes velocity from pressure drop using Ergun's equation
     N = params.N
     ΔZ = 1 / N
@@ -46,10 +46,6 @@ function compute_velocity(P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅_right=1)
     μ_CO₂  = params.μ_CO₂
     μ_H₂O  = params.μ_H₂O
 
-    # Velocity ramping to reduce initial stiffness
-    ramp_time = 10.0  # Time to reach full inlet velocity
-    v_feed_ramp = 0.5 * (1 + tanh(5 * (t - ramp_time/2) / ramp_time))
-
     # Calculate viscosity and gas density in each cell
     μ = params.buffers["μ"]
     ρ_gas = params.buffers["ρ_gas"]
@@ -59,20 +55,22 @@ function compute_velocity(P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅_right=1)
     b = 150μ * (1 - ε) ./ (2rₚ * 1.75ρ_gas)
     c = ε^3 * 2rₚ ./ (1.75ρ_gas * (1 - ε))
 
-    v̅_zf = params.buffers["v̅_zf"]
-
     # Calculate superficial velocity using Ergun equation
-    v̅_zf[1] = v_feed_ramp * ε
+    v̅_zf[1] = 1.0
     @inbounds for j in 1:N
         if j == N
-            ΔPΔZ = P₀ * (P̅_right - P̅[j]) / (ΔZ/2)
+            ΔPΔZ = P₀ / L * (P̅_right - P̅[j]) / (ΔZ/2)
         else 
-            ΔPΔZ = P₀ * (P̅[j+1] - P̅[j]) / ΔZ
+            ΔPΔZ = P₀ / L * (P̅[j+1] - P̅[j]) / ΔZ
         end
 
-        v̅_zf[j+1] = - 1/2 * sign(ΔPΔZ) * (-b[j] + sqrt(b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ)) / (v₀ * L)
-    end
+        if b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ < 0
+            v̅_zf[j+1] = 0.0
+        else
+            v̅_zf[j+1] = - 1/2 * sign(ΔPΔZ) * (-b[j] + sqrt(b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ)) / (ε * v₀)
+            v̅_zf[j+1] = max(v̅_zf[j+1], 0.0)
+        end
 
-    # Return interstitial velocity
-    return v̅_zf / ε
+        # v̅_zf[j+1] = - ΔPΔZ * 4/150 * ε^2 / (1 - ε^2) * rₚ^2 / (μ[j] * v₀)
+    end
 end

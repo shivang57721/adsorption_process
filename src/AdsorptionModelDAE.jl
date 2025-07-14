@@ -150,28 +150,18 @@ function adsorption_dae!(res, du, u, params, t)
     Pe   = v₀ * L / Dₗ                                       # Peclet number
     Peₕ  = (ε * v₀ * L) / (K_gas / (ρ_gas[1] * Cₚ_gas))      # Heat Peclet number
     ψ    = (R * T₀ * qₛ₀) / Pₕ * (1 - ε) / ε * ρₛ
-    @. Σxᵢ  = x_CO₂ + x_H₂O  # x_N₂ = 0 everywhere, so omitted
-    @. Ω₁   = (K_gas / (v₀ * ε * L)) / ((1 - ε) / ε * (ρₛ * Cₚₛ + qₛ₀ * Cₚ_ads * Σxᵢ))
-    @. Ω₂   = ((Cₚ_gas / R) * (P₀ / T₀)) / ((1 - ε) / ε * (ρₛ * Cₚₛ + qₛ₀ * Cₚ_ads * Σxᵢ))
-    @. Ω₃   = (Cₚ_ads * qₛ₀) / (ρₛ * Cₚₛ + qₛ₀ * Cₚ_ads * Σxᵢ)
-    @. Ω₄   = (2h_in / r_in) * (L / v₀) / ((1 - ε) * (ρₛ * Cₚₛ + qₛ₀ * Cₚ_ads * Σxᵢ))
-    @. σ_CO₂ = (qₛ₀ / T₀) * (- ΔH_CO₂) / (ρₛ * Cₚₛ + qₛ₀ * Cₚ_ads * Σxᵢ)
-    @. σ_H₂O = (qₛ₀ / T₀) * (- ΔH_H₂O) / (ρₛ * Cₚₛ + qₛ₀ * Cₚ_ads * Σxᵢ)
+
+    @. Σxᵢ  = x_CO₂ + x_H₂O
+    @. Ω₁   = (K_gas / (v₀ * ε * L)) / ((1 - ε) / ε * (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ))
+    @. Ω₂   = ((Cₚ_gas / R) * (P₀ / T₀)) / ((1 - ε) / ε * (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ))
+    @. Ω₃   = (ρ_gas * Cₚ_ads * qₛ₀) / (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ)
+    @. Ω₄   = (2h_in / r_in) * (L / v₀) / ((1 - ε) * (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ))
+    @. σ_CO₂ = (ρ_gas * qₛ₀ / T₀) * (- ΔH_CO₂) / (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ)
+    @. σ_H₂O = (ρ_gas * qₛ₀ / T₀) * (- ΔH_H₂O) / (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ)
 
     Π₁   = K_wall / (ρ_wall * Cₚ_wall * v₀ * L)
     Π₂   = 2r_in * h_in / (r_out^2 - r_in^2) * L / (ρ_wall * Cₚ_wall * v₀)
     Π₃   = 2r_out * h_out / (r_out^2 - r_in^2) * L / (ρ_wall * Cₚ_wall * v₀)
-
-    # Compute P̅ and T̅ at cell faces using WENO
-    P̅_zf = params.buffers["P̅_zf"]
-    P̅_left = P̅[1] + (150μ[1] * (ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v₀ + 1.75 * (ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v₀ * abs(v₀)) / P₀
-    P̅_right = 1
-    WENO!(P̅_zf, P̅, P̅_left, P̅_right)
-
-    T̅_zf = params.buffers["T̅_zf"]
-    T̅_left = (T̅[1] + Peₕ * ΔZ/2) / (1 + Peₕ * ΔZ/2)
-    T̅_right = T̅[N]
-    WENO!(T̅_zf, T̅, T̅_left, T̅_right)
 
     #────────────────────────────────────────────
     # Algebraic constraints
@@ -184,16 +174,15 @@ function adsorption_dae!(res, du, u, params, t)
     # μ and ρ_gas computation (needed for velocity)
     @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂
     @. ρ_gas = P₀ / (R * T_feed) * (y_CO₂ * 44.009 + y_H₂O * 18.01528 + y_N₂ * 28.0134) * 1e-3
-    
-    # Boundary condition for velocity (dimensionless)
+
     res_v̅[1] = v̅_zf[1] - 1.0
     
     # Velocity constraints using Ergun equation
     @inbounds for j in 1:N
         if j == N
-            ΔPΔZ = P₀ * (1.0 - P̅[j]) / (ΔZ/2)  # P̅_right = 1
+            ΔPΔZ = P₀ / L * (1.0 - P̅[j]) / (ΔZ/2)  # P̅_right = 1
         else 
-            ΔPΔZ = P₀ * (P̅[j+1] - P̅[j]) / ΔZ
+            ΔPΔZ = P₀ / L * (P̅[j+1] - P̅[j]) / ΔZ
         end
         
         # Ergun equation: ΔP/ΔZ = 150μ/(4rₚ²) * (1-ε)²/ε² * v + 1.75ρ/(2rₚ) * (1-ε)/ε * v|v|
@@ -201,6 +190,18 @@ function adsorption_dae!(res, du, u, params, t)
         res_v̅[j+1] = ΔPΔZ - (150 * μ[j]) / (4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[j+1] - 
                           1.75 * ρ_gas[j] / (2rₚ) * (1 - ε) / ε * v̅_zf[j+1] * abs(v̅_zf[j+1])
     end
+
+    # Compute P̅ and T̅ and y at cell faces using WENO
+    P̅_zf = params.buffers["P̅_zf"]
+    P̅_left = P̅[1] + (150μ[1] * (L * ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[1] + 1.75 * (L * ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v̅_zf[1] * abs(v̅_zf[1])) * (v₀ / P₀)
+    # P̅_left = P̅[1] + (v̅_zf[1] * ΔZ/2) / ((4/150) * ε^2 / (1 - ε)^2 * rₚ² * (P₀ / (μ[1] * v₀ * L)))
+    P̅_right = 1
+    WENO!(P̅_zf, P̅, P̅_left, P̅_right)
+
+    T̅_zf = params.buffers["T̅_zf"]
+    T̅_left = (T̅[1] + v̅_zf[1] * Peₕ * ΔZ/2) / (1 + v̅_zf[1] * Peₕ * ΔZ/2)
+    T̅_right = T̅[N]
+    WENO!(T̅_zf, T̅, T̅_left, T̅_right)
     
     #────────────────────────────────────────────
     # Differential equations (residual form: res = du - f(u))
@@ -277,7 +278,7 @@ function adsorption_dae!(res, du, u, params, t)
 
         # Compute yᵢ at cell faces using WENO
         yᵢ_zf    = similar(yᵢ, N + 1)
-        yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
+        yᵢ_left  = (yᵢ[1] + yᵢ_feed * v̅_zf[1] * Pe * ΔZ/2) / (1 + v̅_zf[1] * Pe * ΔZ/2)
         yᵢ_right = yᵢ[N]
         WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right; clamp_result=true)
 

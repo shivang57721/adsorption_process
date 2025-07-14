@@ -1,9 +1,8 @@
 using Revise
 
 include("../src/AdsorptionModel.jl"); Revise.track("src/AdsorptionModel.jl")
-using .AdsorptionModel
 
-include("../src/util.jl")
+include("../src/util.jl"); Revise.track("src/util.jl")
 
 using Plots
 using DifferentialEquations
@@ -38,8 +37,8 @@ prob = ODEProblem(adsorption_equations!, u0, tspan, params)
             reltol = 1e-5,
             saveat = 0.01,
             verbose = true,
-            dtmin = 1e-15,
-            isoutofdomain = (u,p,t) -> minimum(u) < -1e-12)
+            dtmin = 1e-12,
+            isoutofdomain = (u,p,t) -> minimum(u) < 0)
 
 # Unpack sol
 y_CO₂  = t -> sol(t)[1:N]
@@ -52,13 +51,20 @@ T̅      = t -> sol(t)[6N+1:7N]
 T̅_wall = t -> sol(t)[7N+1:8N]
 # x_N₂ is implicitly zero everywhere
 x_N₂   = t -> zeros(N)
-v̅_zf   = t -> compute_velocity(P̅(t); y_CO₂ = y_CO₂(t), y_N₂ = y_N₂(t), y_H₂O = y_H₂O(t), params)
+v̅_zf   = t -> begin
+    buffer = zeros(N+1)
+    compute_velocity!(buffer, P̅(t); y_CO₂ = y_CO₂(t), y_N₂ = y_N₂(t), y_H₂O = y_H₂O(t), params, t)
+    buffer
+end
 
-plot(P̅(sol.t[end]), title="pressure")
-plot(v̅_zf(200), title="velocity")
+plot(P̅(200), title="pressure")
+plot(v̅_zf(0.5), title="velocity")
 plot(T̅(200), title="temperature")
-plot(y_CO₂(200), title="y_CO₂")
-plot(y_H₂O(200), title="y_CO₂")
+
+plot(y_CO₂(0.1), title="y_CO₂")
+
+
+plot(y_H₂O(10), title="y_H₂O")
 plot(y_N₂(200), title="y_N₂")
 
 plot(T̅_wall(200), title="temperature wall")

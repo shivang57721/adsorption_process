@@ -21,6 +21,7 @@ function setup_dae_problem(params)
     x0_CO₂  = fill(0.0, N)
     x0_H₂O  = fill(0.0, N)
     P̅0      = fill(1.0, N)
+    # P̅0      = range(1.035, 1.0, length=N) |> collect
     T̅0      = fill(1.0, N)
     T̅_wall0 = fill(1.0, N)
     
@@ -78,6 +79,7 @@ function test_dae_residuals(params)
     x0_CO₂  = fill(0.0, N)
     x0_H₂O  = fill(0.0, N)
     P̅0      = fill(1.0, N)
+    # P̅0      = range(1.05, 1.0, length=N) |> collect
     T̅0      = fill(1.0, N)
     T̅_wall0 = fill(1.0, N)
     
@@ -135,12 +137,9 @@ if !@isdefined(TESTING) || !TESTING
     println("\nSetting up and solving DAE problem...")
     prob = setup_dae_problem(params)
     
-    @time sol = solve(prob,
-    DABDF2(autodiff=AutoFiniteDiff()),
+    @time sol = solve(prob, IDA(),
         abstol = 1e-6,
         reltol = 1e-5,
-        dtmin = 1e-20,
-        saveat = 0.1,
         verbose = true
     )
     
