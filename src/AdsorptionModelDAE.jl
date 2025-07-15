@@ -87,7 +87,6 @@ function adsorption_dae!(res, du, u, params, t)
     Ω₄ = params.buffers["Ω₄"]
     σ_CO₂ = params.buffers["σ_CO₂"]
     σ_H₂O = params.buffers["σ_H₂O"]
-    σ_N₂ = params.buffers["σ_N₂"]
 
     #────────────────────────────────────────────
     # State vector layout for DAE:
@@ -170,7 +169,6 @@ function adsorption_dae!(res, du, u, params, t)
     # Constraint 1: y_CO₂ + y_H₂O + y_N₂ = 1
     @. res_y_N₂ = y_N₂ - (1.0 - y_CO₂ - y_H₂O)
     
-    # Constraint 2: Velocity from simplified Ergun equation
     # μ and ρ_gas computation (needed for velocity)
     @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂
     @. ρ_gas = P₀ / (R * T_feed) * (y_CO₂ * 44.009 + y_H₂O * 18.01528 + y_N₂ * 28.0134) * 1e-3
@@ -186,14 +184,14 @@ function adsorption_dae!(res, du, u, params, t)
         end
         
         # Ergun equation: ΔP/ΔZ = 150μ/(4rₚ²) * (1-ε)²/ε² * v + 1.75ρ/(2rₚ) * (1-ε)/ε * v|v|
-        # Rearranged as residual: ΔPΔZ - (viscous term) - (inertial term) = 0
         res_v̅[j+1] = ΔPΔZ - (150 * μ[j]) / (4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[j+1] - 
                           1.75 * ρ_gas[j] / (2rₚ) * (1 - ε) / ε * v̅_zf[j+1] * abs(v̅_zf[j+1])
     end
 
     # Compute P̅ and T̅ and y at cell faces using WENO
     P̅_zf = params.buffers["P̅_zf"]
-    P̅_left = P̅[1] + (150μ[1] * (L * ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[1] + 1.75 * (L * ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v̅_zf[1] * abs(v̅_zf[1])) * (v₀ / P₀)
+    P̅_left = P̅[1] + (150μ[1] * (L * ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[1] + 
+                        1.75 * (L * ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v̅_zf[1] * abs(v̅_zf[1])) * (v₀ / P₀)
     # P̅_left = P̅[1] + (v̅_zf[1] * ΔZ/2) / ((4/150) * ε^2 / (1 - ε)^2 * rₚ² * (P₀ / (μ[1] * v₀ * L)))
     P̅_right = 1
     WENO!(P̅_zf, P̅, P̅_left, P̅_right)
@@ -280,7 +278,7 @@ function adsorption_dae!(res, du, u, params, t)
         yᵢ_zf    = similar(yᵢ, N + 1)
         yᵢ_left  = (yᵢ[1] + yᵢ_feed * v̅_zf[1] * Pe * ΔZ/2) / (1 + v̅_zf[1] * Pe * ΔZ/2)
         yᵢ_right = yᵢ[N]
-        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right; clamp_result=true)
+        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right)
 
         @. yᵢ_flux = yᵢ_zf * (P̅_zf / T̅_zf) * v̅_zf
 

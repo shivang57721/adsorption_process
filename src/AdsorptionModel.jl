@@ -84,7 +84,6 @@ function adsorption_equations!(du, u, params, t)
     Ω₄ = params.buffers["Ω₄"]
     σ_CO₂ = params.buffers["σ_CO₂"]
     σ_H₂O = params.buffers["σ_H₂O"]
-    σ_N₂ = params.buffers["σ_N₂"]
 
     #────────────────────────────────────────────
     # Unpack u and du
@@ -153,6 +152,21 @@ function adsorption_equations!(du, u, params, t)
     WENO!(T̅_zf, T̅, T̅_left, T̅_right)
 
     #────────────────────────────────────────────
+    # Solid phase mass balance equation
+    #────────────────────────────────────────────
+    # H₂O
+    q_H₂O_star     = q_star_H₂O.(T₀ * T̅, P₀ * P̅ .* y_H₂O)
+    x_H₂O_star     = q_H₂O_star / qₛ₀
+    α_H₂O          = k_H₂O * L / v₀
+    @. dx_H₂O      = α_H₂O * (x_H₂O_star - x_H₂O)
+
+    # CO₂
+    q_CO₂_star     = q_star_CO₂.(T₀ * T̅, P₀ * P̅ .* y_CO₂, x_H₂O * qₛ₀)
+    x_CO₂_star     = q_CO₂_star / qₛ₀
+    α_CO₂          = k_CO₂ * L / v₀
+    @. dx_CO₂      = α_CO₂ * (x_CO₂_star - x_CO₂)
+
+    #────────────────────────────────────────────
     # Column energy balance equation
     #────────────────────────────────────────────
     T̅_flux = params.buffers["T̅_flux"]
@@ -194,10 +208,11 @@ function adsorption_equations!(du, u, params, t)
     #────────────────────────────────────────────
     y_vars  = (y_CO₂, y_N₂, y_H₂O)
     dy_vars = (dy_CO₂, dy_N₂, dy_H₂O)
-    dx_vars = (dx_CO₂, nothing, dx_H₂O)  # dx_N₂ = 0, so use nothing as placeholder
+    dx_vars = (dx_CO₂, nothing, dx_H₂O)
     y_feed_vals = (y_feed_CO₂, y_feed_N₂, y_feed_H₂O)
 
     yᵢ_flux = params.buffers["y_flux"]
+    yᵢ_zf    = params.buffers["y_zf"]
 
     @inbounds for i in 1:3  # 1:CO₂, 2:N₂, 3:H₂O
         yᵢ       = y_vars[i]
@@ -206,10 +221,9 @@ function adsorption_equations!(du, u, params, t)
         yᵢ_feed  = y_feed_vals[i]
 
         # Compute yᵢ at cell faces using WENO
-        yᵢ_zf    = params.buffers["y_zf"]
         yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
         yᵢ_right = yᵢ[N]
-        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right; clamp_result=true)
+        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right)
 
         @. yᵢ_flux = yᵢ_zf * (P̅_zf / T̅_zf) * v̅_zf
 

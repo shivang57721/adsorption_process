@@ -1,6 +1,6 @@
 # Computes weno of u at the faces; result stored in place in u_zf
 # Boundary Conditions are provided
-function WENO!(f_zf, f, f_left, f_right; clamp_result=false)
+function WENO!(f_zf, f, f_left, f_right)
     N = length(f)
     f_zf[1]   = f_left
     f_zf[N+1] = f_right
@@ -23,9 +23,19 @@ function WENO!(f_zf, f, f_left, f_right; clamp_result=false)
                         α₁ⱼ / (α₀ⱼ + α₁ⱼ) * (3/2 * f[j] - 1/2 * f[j-1])
         end
         f_zf[j+1] = isnan(value) ? 1/2 * (f[j] + f[j+1]) : value
-        if clamp_result
-            f_zf[j+1] = clamp(f_zf[j+1], 0.0, 1.0)
-        end
+        # clamp_result
+        f_zf[j+1] = clamp(f_zf[j+1], 0.0, 10.0)
+    end
+end
+
+# Replace WENO calls with simple upwind for testing
+function simple_upwind!(f_zf, f, f_left, f_right)
+    N = length(f)
+    f_zf[1] = f_left
+    f_zf[N+1] = f_right
+    @inbounds for j in 1:(N-1)
+        f_zf[j+1] = f[j]  # Simple upwind
+        f_zf[j+1] = clamp(f_zf[j+1], 0.0, 10.0)
     end
 end
 
@@ -49,11 +59,12 @@ function compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅
     # Calculate viscosity and gas density in each cell
     μ = params.buffers["μ"]
     ρ_gas = params.buffers["ρ_gas"]
-    @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂
-    @. ρ_gas = P₀ / (R * T_feed) * (y_CO₂ * 44.009 + y_H₂O * 18.01528 + y_N₂ * 28.0134) * 1e-3
 
-    b = 150μ * (1 - ε) ./ (2rₚ * 1.75ρ_gas)
-    c = ε^3 * 2rₚ ./ (1.75ρ_gas * (1 - ε))
+    b = params.buffers["b"]
+    c = params.buffers["c"]
+
+    @. b = 150μ * (1 - ε) / (2rₚ * 1.75ρ_gas)
+    @. c = ε^3 * 2rₚ / (1.75ρ_gas * (1 - ε))
 
     # Calculate superficial velocity using Ergun equation
     v̅_zf[1] = 1.0
@@ -63,11 +74,6 @@ function compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅
         else 
             ΔPΔZ = P₀ / L * (P̅[j+1] - P̅[j]) / ΔZ
         end
-
-        if b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ < 0
-            v̅_zf[j+1] = 0.0
-        else
-            v̅_zf[j+1] = - 1/2 * sign(ΔPΔZ) * (-b[j] + sqrt(b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ)) / (ε * v₀)
-        end
+        v̅_zf[j+1] = - 1/2 * sign(ΔPΔZ) * (-b[j] + sqrt(b[j]^2 + sign(ΔPΔZ) * 4c[j] * ΔPΔZ)) / (ε * v₀)
     end
 end

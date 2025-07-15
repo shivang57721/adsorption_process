@@ -6,9 +6,11 @@ include("../src/util.jl"); Revise.track("src/util.jl")
 
 using Plots
 using DifferentialEquations
+using BenchmarkTools
 using Sundials
 using Random
 using ODEInterfaceDiffEq
+using Profile
 Random.seed!(1) 
 
 # Load params file
@@ -34,6 +36,7 @@ tspan = (0.0, 200.0)
 prob = ODEProblem(adsorption_equations!, u0, tspan, params)
 
 @time sol = solve(prob, Rodas5P(autodiff = AutoFiniteDiff());
+            reltol = 1e-6,
             abstol = 1e-6,
             saveat = 0.01,
             verbose = true,
@@ -57,14 +60,13 @@ v̅_zf   = t -> begin
     buffer
 end
 
-plot(P̅(30), title="pressure")
-plot(v̅_zf(30), title="velocity")
-plot(T̅(200), title="temperature")
+plot(P̅(0.1), title="pressure")
+plot(v̅_zf(0.1), title="velocity")
+plot(T̅(10), title="temperature")
 
 plot(y_CO₂(1), title="y_CO₂")
 
+plot(y_H₂O(1), title="y_H₂O")
+plot(y_N₂(1), title="y_N₂")
 
-plot(y_H₂O(10), title="y_H₂O")
-plot(y_N₂(200), title="y_N₂")
-
-plot(T̅_wall(200), title="temperature wall")
+plot(T̅_wall(1), title="temperature wall")
