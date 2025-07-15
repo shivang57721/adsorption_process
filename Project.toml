@@ -2,6 +2,7 @@
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+ODEInterfaceDiffEq = "09606e27-ecf5-54fc-bb29-004bd9f985bf"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 OrdinaryDiffEqLowStorageRK = "b0944070-b475-4768-8dec-fb6eb410534d"
 OrdinaryDiffEqSSPRK = "669c94d9-1f4b-4b64-b377-1aa079aa2388"

@@ -92,25 +92,43 @@ function adsorption_mass_matrix!(du, u, params, t)
     #────────────────────────────────────────────
     # Unpack u and du
     #────────────────────────────────────────────
-    # Unpack u
-    y_CO₂  = @view u[1:N]
-    y_N₂   = @view u[N+1:2N]
-    y_H₂O  = @view u[2N+1:3N]
-    x_CO₂  = @view u[3N+1:4N]
-    x_H₂O  = @view u[4N+1:5N]
-    P̅      = @view u[5N+1:6N]
-    T̅      = @view u[6N+1:7N]
-    T̅_wall = @view u[7N+1:8N]
 
-    # Unpack du
-    dy_CO₂  = @view du[1:N]
-    dy_N₂   = @view du[N+1:2N]
-    dy_H₂O  = @view du[2N+1:3N]
-    dx_CO₂  = @view du[3N+1:4N]
-    dx_H₂O  = @view du[4N+1:5N]
-    dP̅      = @view du[5N+1:6N]
-    dT̅      = @view du[6N+1:7N]
-    dT̅_wall = @view du[7N+1:8N]
+    # Differential variable indices
+    y_CO₂_idx  = 1:N
+    y_H₂O_idx  = N+1:2N
+    x_CO₂_idx  = 2N+1:3N
+    x_H₂O_idx  = 3N+1:4N
+    P̅_idx      = 4N+1:5N
+    T̅_idx      = 5N+1:6N
+    T̅_wall_idx = 6N+1:7N
+    
+    # Algebraic variable indices
+    y_N₂_idx   = 7N+1:8N         # y_N₂ (algebraic)
+    v̅_idx      = 8N+1:8N+(N+1)   # v̅ at faces (algebraic)
+
+    # Extract state variables
+    y_CO₂  = @view u[y_CO₂_idx]
+    y_H₂O  = @view u[y_H₂O_idx]
+    x_CO₂  = @view u[x_CO₂_idx]
+    x_H₂O  = @view u[x_H₂O_idx]
+    P̅      = @view u[P̅_idx]
+    T̅      = @view u[T̅_idx]
+    T̅_wall = @view u[T̅_wall_idx]
+    y_N₂   = @view u[y_N₂_idx]     # Algebraic
+    v̅_zf   = @view u[v̅_idx]        # Algebraic
+
+    # Extract derivatives (only for differential variables)
+    dy_CO₂  = @view du[y_CO₂_idx]
+    dy_H₂O  = @view du[y_H₂O_idx]
+    dx_CO₂  = @view du[x_CO₂_idx]
+    dx_H₂O  = @view du[x_H₂O_idx]
+    dP̅      = @view du[P̅_idx]
+    dT̅      = @view du[T̅_idx]
+    dT̅_wall = @view du[T̅_wall_idx]
+
+    # Extract derivatives for algebraic variables (technically these are residuals)
+    dy_N₂   = @view du[y_N₂_idx]
+    dv̅_zf   = @view du[v̅_idx]
     
     # μ and ρ_gas
     @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂ # viscosity in each cell

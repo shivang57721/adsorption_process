@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.11.5"
+julia_version = "1.11.6"
 manifest_format = "2.0"
-project_hash = "8be1a79b9eee14b85babc3fe5b3768ae83d7b13f"
+project_hash = "6d7eb1cc69e91bc3909328b96ee2eeb9fe69c496"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "be7ae030256b8ef14a441726c4c37766b90b93a3"
@@ -173,12 +173,10 @@ deps = ["ADTypes", "BoundaryValueDiffEqAscher", "BoundaryValueDiffEqCore", "Boun
 git-tree-sha1 = "d6ec33e4516b2e790a64128afdb54f3b536667a7"
 uuid = "764a87c0-6b3e-53db-9096-fe964310641d"
 version = "5.18.0"
+weakdeps = ["ODEInterface"]
 
     [deps.BoundaryValueDiffEq.extensions]
     BoundaryValueDiffEqODEInterfaceExt = "ODEInterface"
-
-    [deps.BoundaryValueDiffEq.weakdeps]
-    ODEInterface = "54ca160b-1b9f-5127-a996-1867f4bc2a2c"
 
 [[deps.BoundaryValueDiffEqAscher]]
 deps = ["ADTypes", "AlmostBlockDiagonals", "BoundaryValueDiffEqCore", "ConcreteStructs", "DiffEqBase", "DifferentiationInterface", "FastClosures", "ForwardDiff", "LinearAlgebra", "PreallocationTools", "RecursiveArrayTools", "Reexport", "SciMLBase", "Setfield"]
@@ -1559,6 +1557,24 @@ weakdeps = ["ForwardDiff"]
 
     [deps.NonlinearSolveSpectralMethods.extensions]
     NonlinearSolveSpectralMethodsForwardDiffExt = "ForwardDiff"
+
+[[deps.ODEInterface]]
+deps = ["Dates", "Libdl", "LinearAlgebra", "Markdown", "ODEInterface_jll", "Unicode"]
+git-tree-sha1 = "5dfb3d7199de97cfdc81f1971a2727e628ff472b"
+uuid = "54ca160b-1b9f-5127-a996-1867f4bc2a2c"
+version = "0.5.0"
+
+[[deps.ODEInterfaceDiffEq]]
+deps = ["Compat", "DataStructures", "DiffEqBase", "FunctionWrappers", "LinearAlgebra", "ODEInterface", "Reexport", "SciMLBase"]
+git-tree-sha1 = "598df5118c036a8ac8a53c5d158921eba5fc0d32"
+uuid = "09606e27-ecf5-54fc-bb29-004bd9f985bf"
+version = "3.13.4"
+
+[[deps.ODEInterface_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "3021aa85a1cd566a533635246b7ed31a29c72c93"
+uuid = "c771fb93-2439-5ece-a3b3-58fecce82101"
+version = "0.0.1+0"
 
 [[deps.Octavian]]
 deps = ["CPUSummary", "IfElse", "LoopVectorization", "ManualMemory", "PolyesterWeave", "PrecompileTools", "Static", "StaticArrayInterface", "ThreadingUtilities", "VectorizationBase"]

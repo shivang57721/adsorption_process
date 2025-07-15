@@ -138,17 +138,17 @@ function adsorption_equations!(du, u, params, t)
 
     # Compute local velcoity at cell boundaries
     v̅_zf = params.buffers["v̅_zf"]
-    compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t)
+    compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅_right=1.0)
 
     # Compute P̅ and T̅ and y at cell faces using WENO
     P̅_zf = params.buffers["P̅_zf"]
-    P̅_left = P̅[1] + (150μ[1] * (L * ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * v̅_zf[1] + 
-                  + 1.75 * (L * ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * v̅_zf[1] * abs(v̅_zf[1])) * (v₀ / P₀)
+    P̅_left = P̅[1] + (150μ[1] * (L * ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * 1.0 + 
+                  + 1.75 * (L * ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * 1.0 * abs(1.0)) / P₀
     P̅_right = 1
     WENO!(P̅_zf, P̅, P̅_left, P̅_right)
 
     T̅_zf = params.buffers["T̅_zf"]
-    T̅_left = (T̅[1] + v̅_zf[1] * Peₕ * ΔZ/2) / (1 + v̅_zf[1] * Peₕ * ΔZ/2)
+    T̅_left = (T̅[1] + 1.0 * Peₕ * ΔZ/2) / (1 + 1.0 * Peₕ * ΔZ/2)
     T̅_right = T̅[N]
     WENO!(T̅_zf, T̅, T̅_left, T̅_right)
 

@@ -8,6 +8,7 @@ using Plots
 using DifferentialEquations
 using Sundials
 using Random
+using ODEInterfaceDiffEq
 Random.seed!(1) 
 
 # Load params file
@@ -32,9 +33,8 @@ tspan = (0.0, 200.0)
 
 prob = ODEProblem(adsorption_equations!, u0, tspan, params)
 
-@time sol = solve(prob, QNDF(autodiff = AutoFiniteDiff());
+@time sol = solve(prob, Rodas5P(autodiff = AutoFiniteDiff());
             abstol = 1e-6,
-            reltol = 1e-5,
             saveat = 0.01,
             verbose = true,
             dtmin = 1e-12,
@@ -57,11 +57,11 @@ v̅_zf   = t -> begin
     buffer
 end
 
-plot(P̅(100), title="pressure")
-plot(v̅_zf(200), title="velocity")
-plot(T̅(10), title="temperature")
+plot(P̅(30), title="pressure")
+plot(v̅_zf(30), title="velocity")
+plot(T̅(200), title="temperature")
 
-plot(y_CO₂(0.9), title="y_CO₂")
+plot(y_CO₂(1), title="y_CO₂")
 
 
 plot(y_H₂O(10), title="y_H₂O")
