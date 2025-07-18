@@ -24,6 +24,8 @@ y0_H₂O  = fill(0.0, N)
 x0_CO₂  = fill(0, N)
 # x0_N₂ removed since it's always zero
 x0_H₂O  = fill(0, N)
+
+# v0(z) = exp(-100 * z^2)
 P̅0      = fill(1.0, N)
 T̅0      = fill(0.95, N)
 T̅_wall0 = fill(1.0, N)
@@ -60,13 +62,15 @@ v̅_zf   = t -> begin
     buffer
 end
 
-plot(P̅(0.1), title="pressure")
-plot(v̅_zf(0.1), title="velocity")
-plot(T̅(10), title="temperature")
+plot(P̅(10), title="pressure")
+
+plot(v̅_zf(10), title="velocity")
+
+plot(T̅(100), title="temperature")
 
 plot(y_CO₂(1), title="y_CO₂")
 
 plot(y_H₂O(1), title="y_H₂O")
 plot(y_N₂(1), title="y_N₂")
 
-plot(T̅_wall(1), title="temperature wall")
+plot(T̅_wall(200), title="temperature wall")
