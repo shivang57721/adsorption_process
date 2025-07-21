@@ -1,7 +1,6 @@
 """
 Simulation of adsorption equations with VoronoiFVM.jl
 """
-
 const ε_total  = 0.742
 const ε_bed    = 0.403
 const Cₚ_gas   = 30.7
@@ -17,6 +16,11 @@ const μ = 1.789e-5
 const rₚ = 1e-3
 const dₚ = 2rₚ
 const K_gas = 0.09
+
+using DifferentialEquations
+using VoronoiFVM
+using LinearAlgebra
+using Plots
 Base.@kwdef struct AdsorptionData
     k = - 1 / (150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2))
 
@@ -33,8 +37,8 @@ darcy_velocity(u, data) = data.k * R * (u[data.ip, 2] - u[data.ip, 1])
 function flux(f, u, edge, data)
     # Flux for c is just v * c at edge
     vh = darcy_velocity(u, data)
-    f[data.ic] = vh * u[data.ic]
-    f[data.iT] = - ε_bed * K_gas * (u[data.iT, 2] - u[data.iT, 1]) + Cₚ_gas * vh * u[data.iT]
+    f[data.ic] = vh * u[data.ic, 1]
+    f[data.iT] = - ε_bed * K_gas * (u[data.iT, 2] - u[data.iT, 1]) + Cₚ_gas * vh * u[data.iT, 1]
 end
 
 function storage(y, u, node, data)
@@ -47,18 +51,24 @@ function reaction(y, u, node, data)
     y[data.ip] = u[data.ip] - u[data.ic] * R * u[data.iT]
 end
 
-function bcondition(y, u, node, data)
+function bcondition(y, u, bnode, data)
     boundary_dirichlet!(y, u, bnode; species = data.ic, region = data.Γ_in, value = P_high / (R * T_feed))
     boundary_dirichlet!(y, u, bnode; species = data.iT, region = data.Γ_in, value = T_feed)
     boundary_dirichlet!(y, u, bnode; species = data.ip, region = data.Γ_in, value = P_high)
 
     # Maybe change these conditions with boutflow conditions
-    boundary_neumann!(y, u, bnode; species = data.ic, region = data.Γ_out, value = 0)
-    boundary_neumann!(y, u, bnode; species = data.iT, region = data.Γ_out, value = 0)
+    # boundary_neumann!(y, u, bnode; species = data.ic, region = data.Γ_out, value = 0)
+    # boundary_neumann!(y, u, bnode; species = data.iT, region = data.Γ_out, value = 0)
     boundary_neumann!(y, u, bnode; species = data.ip, region = data.Γ_out, value = 0)
 end
 
-X = 0:0.1:1
+function boutflow(y, u, edge, data)
+    vh = darcy_velocity(u, data)
+    y[data.ic] = vh * u[data.ic, outflownode(edge)]
+    # y[data.iT] = Cₚ_gas * vh * u[data.iT, outflownode(edge)]
+end
+
+X = 0:0.01:1
 data = AdsorptionData(;)
 grid = VoronoiFVM.Grid(X)
 sys = VoronoiFVM.System(
@@ -67,8 +77,26 @@ sys = VoronoiFVM.System(
     flux,
     reaction,
     bcondition,
+    boutflow,
+    outflowboundaries = [data.Γ_out],
     data,
     species = [1,2,3]
 )
 
-sol = solve(sys)
+diffeqmethods = Dict(
+    "Rosenbrock23 (Rosenbrock)"    => Rosenbrock23,
+    "QNDF2 (Like matlab's ode15s)" => QNDF2,
+    "FBDF"                         => FBDF,
+    "Implicit Euler"               => ImplicitEuler
+)
+
+inival = unknowns(sys)
+inival[data.ip, :] .= 1
+inival[data.iT, :] .= T_feed
+state = VoronoiFVM.SystemState(sys)
+problem = ODEProblem(state, inival, (0, 10))
+odesol = solve(problem, Rodas5P())
+
+sol = reshape(odesol, sys; state)
+
+plot(sol.u[end][2, :])
