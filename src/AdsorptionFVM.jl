@@ -77,6 +77,45 @@ function flux(f, u, edge, data)
     f[data.iT] = C_gas * vh * T_edge + ε_bed * K_L(vh, C_gas) * (u[data.iT, 1] - u[data.iT, 2])
 end
 
+function flux_upwind(f, u, edge, data)
+    vh = darcy_velocity(u, data)
+
+    # Concentrations at nodes 1 and 2
+    c_N2_1  = u[data.iN2, 1];  c_N2_2  = u[data.iN2, 2]
+    c_CO2_1 = u[data.iCO2, 1]; c_CO2_2 = u[data.iCO2, 2]
+    c_H2O_1 = u[data.iH2O, 1]; c_H2O_2 = u[data.iH2O, 2]
+    T_1     = u[data.iT, 1];   T_2     = u[data.iT, 2]
+
+    # == UPWINDING SCHEME START ==
+    # Determine the upwind concentrations based on flow direction (vh)
+    c_N2_upwind, c_CO2_upwind, c_H2O_upwind, T_upwind = if vh > 0
+        (c_N2_1, c_CO2_1, c_H2O_1, T_1) # Flow is from node 1 to 2
+    else
+        (c_N2_2, c_CO2_2, c_H2O_2, T_2) # Flow is from node 2 to 1
+    end
+    # == UPWINDING SCHEME END ==
+
+    # Total concentrations for dispersion term
+    c_total_1 = u[data.iN2, 1] + u[data.iCO2, 1] + u[data.iH2O, 1]
+    c_total_2 = u[data.iN2, 2] + u[data.iCO2, 2] + u[data.iH2O, 2]
+    c_total_edge = (c_total_1 + c_total_2) / 2
+    
+    # Mole fractions for dispersion term
+    y_N2_1  = u[data.iN2, 1]  / c_total_1; y_N2_2  = u[data.iN2, 2]  / c_total_2
+    y_CO2_1 = u[data.iCO2, 1] / c_total_1; y_CO2_2 = u[data.iCO2, 2] / c_total_2
+    y_H2O_1 = u[data.iH2O, 1] / c_total_1; y_H2O_2 = u[data.iH2O, 2] / c_total_2
+
+    # Calculate fluxes for each component using UPWINDED values for advection
+    f[data.iN2]  = vh * c_N2_upwind  - ε_bed * D_L(vh) * c_total_edge * (y_N2_2  - y_N2_1)
+    f[data.iCO2] = vh * c_CO2_upwind - ε_bed * D_L(vh) * c_total_edge * (y_CO2_2 - y_CO2_1)
+    f[data.iH2O] = vh * c_H2O_upwind - ε_bed * D_L(vh) * c_total_edge * (y_H2O_2 - y_H2O_1)
+    
+    C_gas_upwind = c_CO2_upwind * Cₚ_CO2 + c_H2O_upwind * Cₚ_H2O + c_N2_upwind * Cₚ_N2
+    C_gas_edge = (c_total_1 * (u[data.iCO2,1]*Cₚ_CO2 + u[data.iH2O,1]*Cₚ_H2O + u[data.iN2,1]*Cₚ_N2) + c_total_2 * (u[data.iCO2,2]*Cₚ_CO2 + u[data.iH2O,2]*Cₚ_H2O + u[data.iN2,2]*Cₚ_N2)) / (2*c_total_edge) # Weighted average
+    
+    f[data.iT] = vh * C_gas_upwind * T_upwind + ε_bed * K_L(vh, C_gas_edge) * (T_1 - T_2)
+end
+
 function storage(y, u, node, data)
     y[data.iN2]  = ε_total * u[data.iN2]
     y[data.iCO2] = ε_total * u[data.iCO2]
@@ -116,13 +155,13 @@ function boutflow(y, u, edge, data)
     y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
 end
 
-X = 0:0.01:1
+X = 0:0.005:1
 data = AdsorptionData()
 grid = VoronoiFVM.Grid(X)
 sys = VoronoiFVM.System(
     grid;
     storage,
-    flux,
+    flux = flux_upwind,
     reaction,
     bcondition,
     boutflow,
@@ -151,7 +190,7 @@ problem = ODEProblem(state, inival, (0, 2))
 odesol = solve(problem, FBDF())
 sol = reshape(odesol, sys; state)
 
-idx = 300
-plot(sol.u[idx][data.iT, :], title=sol.t[idx])
+idx = 130
+plot(sol.u[idx][data.iH2O, :], title=sol.t[idx])
 
 plot(sol.u[idx][data.iCO2, :] .+ sol.u[idx][data.iH2O, :] .+ sol.u[idx][data.iN2, :])
