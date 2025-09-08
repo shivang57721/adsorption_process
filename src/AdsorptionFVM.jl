@@ -34,6 +34,14 @@ const h_L = 236
 const h_W = 220
 const a_wall = π * (Rₒ^2 - Rᵢ^2)
 
+const γ₁=0.7
+const γ₂=0.5
+const D_L = γ₁ * Dₘ + γ₂ * dₚ * u_feed / ε_bed
+const K_L = D_L * C_gas_feed
+
+# D_L(u; γ₁=0.7, γ₂=0.5) = γ₁ * Dₘ + γ₂ * dₚ * u / ε_bed
+# K_L(u, C_gas) = D_L(u) * C_gas
+
 using DifferentialEquations
 using VoronoiFVM
 using LinearAlgebra
@@ -51,8 +59,8 @@ Base.@kwdef struct AdsorptionData
 end
 
 darcy_velocity(u, data) = begin
-    k = 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
-    1/k * (u[data.ip, 1] - u[data.ip, 2])
+    k = - 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
+    1/k * (u[data.ip, 2] - u[data.ip, 1])
 end
 
 ergun_velocity(u, data) = begin
@@ -62,11 +70,37 @@ ergun_velocity(u, data) = begin
     sign(dpdz) * (-b + sqrt(b^2 + sign(dpdz)* 4c * dpdz))/2
 end
 
-D_L(u; γ₁=0.7, γ₂=0.5) = γ₁ * Dₘ + γ₂ * dₚ * u / ε_bed
-K_L(u, C_gas) = D_L(u) * C_gas
+function flux_scharfetter_gummel(f, u, edge, data)
+    vh = darcy_velocity(u, data)
+
+    # --- Calculate effective dispersion and Péclet number ---
+    c_total_1 = u[data.iN2, 1] + u[data.iCO2, 1] + u[data.iH2O, 1]
+    c_total_2 = u[data.iN2, 2] + u[data.iCO2, 2] + u[data.iH2O, 2]
+    c_total_edge = (c_total_1 + c_total_2) / 2
+
+    # --- Compute Mole fractions ---
+    y_N2_1  = u[data.iN2, 1]  / c_total_1; y_N2_2  = u[data.iN2, 2]  / c_total_2
+    y_CO2_1 = u[data.iCO2, 1] / c_total_1; y_CO2_2 = u[data.iCO2, 2] / c_total_2
+    y_H2O_1 = u[data.iH2O, 1] / c_total_1; y_H2O_2 = u[data.iH2O, 2] / c_total_2
+
+    bp, bm = fbernoulli_pm(vh / (ε_bed * D_L))
+    f[data.iN2] = ε_bed * D_L * c_total_edge * (bm * y_N2_1 - bp * y_N2_2)
+    f[data.iCO2] = ε_bed * D_L * c_total_edge * (bm * y_CO2_1 - bp * y_CO2_2)
+    f[data.iH2O] = ε_bed * D_L * c_total_edge * (bm * y_H2O_1 - bp * y_H2O_2)
+
+    # --- Thermal Flux (Energy Balance) ---
+    C_gas_1 = u[data.iCO2,1]*Cₚ_CO2 + u[data.iH2O,1]*Cₚ_H2O + u[data.iN2,1]*Cₚ_N2
+    C_gas_2 = u[data.iCO2,2]*Cₚ_CO2 + u[data.iH2O,2]*Cₚ_H2O + u[data.iN2,2]*Cₚ_N2
+    C_gas_edge = (C_gas_1 + C_gas_2) / 2
+
+    T_1     = u[data.iT, 1];   T_2     = u[data.iT, 2]
+    D = ε_bed * K_L
+    bp, bm = fbernoulli_pm(vh * C_gas_edge / D)
+    f[data.iT] = D * (bm * T_1 - bp * T_2)
+end
 
 function flux_upwind(f, u, edge, data)
-    vh = ergun_velocity(u, data)
+    vh = darcy_velocity(u, data)
 
     # Concentrations at nodes 1 and 2
     c_N2_1  = u[data.iN2, 1];  c_N2_2  = u[data.iN2, 2]
@@ -94,14 +128,14 @@ function flux_upwind(f, u, edge, data)
     y_H2O_1 = u[data.iH2O, 1] / c_total_1; y_H2O_2 = u[data.iH2O, 2] / c_total_2
 
     # Calculate fluxes for each component using UPWINDED values for advection
-    f[data.iN2]  = vh * c_N2_upwind  - ε_bed * D_L(vh) * c_total_edge * (y_N2_2  - y_N2_1)
-    f[data.iCO2] = vh * c_CO2_upwind - ε_bed * D_L(vh) * c_total_edge * (y_CO2_2 - y_CO2_1)
-    f[data.iH2O] = vh * c_H2O_upwind - ε_bed * D_L(vh) * c_total_edge * (y_H2O_2 - y_H2O_1)
+    f[data.iN2]  = vh * c_N2_1  - ε_bed * D_L * c_total_1 * (y_N2_2  - y_N2_1)
+    f[data.iCO2] = vh * c_CO2_1 - ε_bed * D_L * c_total_1 * (y_CO2_2 - y_CO2_1)
+    f[data.iH2O] = vh * c_H2O_1 - ε_bed * D_L * c_total_1 * (y_H2O_2 - y_H2O_1)
     
     C_gas_upwind = c_CO2_upwind * Cₚ_CO2 + c_H2O_upwind * Cₚ_H2O + c_N2_upwind * Cₚ_N2
     C_gas_edge = (c_total_1 * (u[data.iCO2,1]*Cₚ_CO2 + u[data.iH2O,1]*Cₚ_H2O + u[data.iN2,1]*Cₚ_N2) + c_total_2 * (u[data.iCO2,2]*Cₚ_CO2 + u[data.iH2O,2]*Cₚ_H2O + u[data.iN2,2]*Cₚ_N2)) / (2*c_total_edge) # Weighted average
     
-    f[data.iT] = vh * C_gas_upwind * T_upwind + ε_bed * K_L(vh, C_gas_edge) * (T_1 - T_2)
+    f[data.iT] = vh * C_gas_upwind * T_upwind - ε_bed * K_L * (T_2 - T_1)
 end
 
 function storage(y, u, node, data)
@@ -136,7 +170,7 @@ end
 
 # Outflow boundary conditions
 function boutflow(y, u, edge, data)
-    vh = ergun_velocity(u, data)
+    vh = darcy_velocity(u, data)
     y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
     y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
     y[data.iH2O]  = -vh * u[data.iH2O, outflownode(edge)]
@@ -154,20 +188,13 @@ grid = VoronoiFVM.Grid(X)
 sys = VoronoiFVM.System(
     grid;
     storage,
-    flux = flux_upwind,
+    flux = flux_scharfetter_gummel,
     reaction,
     bcondition,
     boutflow,
     data,
     outflowboundaries = [data.Γ_out],
     species = [1,2,3,4,5,6]
-)
-
-diffeqmethods = Dict(
-    "Rosenbrock23 (Rosenbrock)"    => Rosenbrock23,
-    "QNDF2 (Like matlab's ode15s)" => QNDF2,
-    "FBDF"                         => FBDF,
-    "Implicit Euler"               => ImplicitEuler
 )
 
 inival = unknowns(sys)
@@ -181,10 +208,10 @@ inival[data.iH2O, :]    .= 0.0
 
 state = VoronoiFVM.SystemState(sys)
 problem = ODEProblem(state, inival, (0, 2))
-odesol = solve(problem, FBDF())
+odesol = solve(problem, Rodas5P())
 sol = reshape(odesol, sys; state)
 
-idx = 150
-plot(sol.u[idx][data.iCO2, :], title=sol.t[idx])
+idx = 68
+plot(sol.u[idx][data.iH2O, :], title=sol.t[idx])
 
 plot(sol.u[idx][data.iCO2, :] .+ sol.u[idx][data.iH2O, :] .+ sol.u[idx][data.iN2, :])
