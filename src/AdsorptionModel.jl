@@ -113,7 +113,7 @@ darcy_velocity(u, data) = begin
     1/k * (u[data.ip, 2] - u[data.ip, 1])
 end
 
-function flux_scharfetter_gummel(f, u, edge, data)
+function flux_exponential(f, u, edge, data)
     vh = darcy_velocity(u, data)
 
     # --- Calculate effective dispersion and Péclet number ---
@@ -205,14 +205,14 @@ function boutflow(y, u, edge, data)
     y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
 end
 
-N = 10
+N = 100
 X = range(0, L, N)
 data = AdsorptionData(;)
 grid = VoronoiFVM.Grid(X)
 sys = VoronoiFVM.System(
     grid;
     storage,
-    flux = flux_scharfetter_gummel,
+    flux = flux_exponential,
     reaction,
     bcondition,
     boutflow,
@@ -233,11 +233,14 @@ inival[data.iq_CO2, :]  .= 0.0
 inival[data.iq_H2O, :]  .= 0.0
 
 state = VoronoiFVM.SystemState(sys)
-problem = ODEProblem(state, inival, (0, 3600))
+problem = ODEProblem(state, inival, (0, 3600*2))
 @time odesol = solve(problem, Rodas5P())
-sol = reshape(odesol, sys; state)
+sol(t) = reshape(odesol(t), sys)
 
-idx = 1:101
-plot(idx, [sol.u[i][data.iq_CO2, end] for i in idx])
-plot(sol.u[end][data.iCO2 , :], title=sol.t[end])
-plot(sol.u[end][data.iCO2 , :], title=sol.t[end])
+t = 3600
+plot(sol(t)[data.iCO2, :], title="CO2 concentration in column at time=$(t)s")
+
+ts = 1:3600*2
+
+plot(ts, [sol(t)[data.iCO2, end] / (sol(t)[data.iCO2, end] + sol(t)[data.iN2, end] +sol(t)[data.iH2O, end])  for t in ts], title="Concentration of CO2 at the end of the column")
+xlabel!("Time (s)")
