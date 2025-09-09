@@ -90,9 +90,7 @@ function q_star_H2O(qm, C, D, F, G, T, p_H2O)
 
     x = p_H2O / Psat_H2O(T - 273)
 
-    q_star = qm * k * c * x / ((1 - k * x) * (1 + (c - 1) * k * x))
-
-    q_star
+    qm * k * c * x / ((1 - k * x) * (1 + (c - 1) * k * x))
 end
 
 function q_star_CO2(ns0, chi, T_ref, b0, DH, t0, alfa, T, R, p_CO2, gamma, beta, q_H2O)
