@@ -25,7 +25,7 @@ const C_gas_feed = c_CO2_feed * Cₚ_CO2 + c_H2O_feed * Cₚ_H2O + c_N2_feed * C
 
 const Dₘ  = 4.3e-6
 const μ = 1.789e-5
-const dₚ = 0.003
+const dₚ = 0.003 
 
 # Experimental params
 const Rₒ = 0.02

@@ -1,268 +1,243 @@
 """
-Semi-discretization of transport equations for adsorption modelling
+Simulation of adsorption equations with VoronoiFVM.jl
 """
 
-include("util.jl")
+using DifferentialEquations
+using VoronoiFVM
+using LinearAlgebra
+using Plots
+include("params.jl")
 
-function adsorption_equations!(du, u, params, t)
-    #────────────────────────────────────────────
-    # Unpack parameters
-    #────────────────────────────────────────────
-    
-    # Discretization parameters
-    N      = params.N               # Number of finite volume elements
-    ΔZ     = 1 / N                  # Space discretization   
-    
-    # Column parameters
-    L      = params.L               # Column length
-    r_in   = params.r_in            # Inner column radius
-    r_out  = params.r_out           # Outer column radius
-    ε      = params.ε               # Bed porosity
-    εₚ     = params.εₚ
-    rₚ     = params.rₚ              # Particle radius
-    τ      = params.τ               # Tortuosity
-    rₚ²    = rₚ^2
+phys_params = PhysicalParams()
+col_params = ColumnParams()
+sorb_params = SorbentParams()
+op_params = OperatingParams()
 
-    # Properties and constants
-    ρₛ          = params.ρₛ              # Adsorbent density
-    ρ_wall      = params.ρ_wall         # Column wall density
-    Cₚ_gas      = params.Cₚ_gas          # Specific heat capacity of gas phase
-    Cₚ_ads      = params.Cₚ_ads          # Specific heat capacity of adsorbed phase
-    Cₚₛ          = params.Cₚₛ             # Specific heat capacity of adsorbent
-    Cₚ_wall     = params.Cₚ_wall         # Specific heat capacity of column wall
-    Dₘ          = params.Dₘ             # Molecular diffusivity
-    γ           = params.γ              # Adiabatic constant
-    K_wall      = params.K_wall         # Thermal conductivity of column wall
-    K_gas       = params.K_gas          # Effective gas thermal conductivity
-    h_in        = params.h_in           # Inside heat transfer coefficient
-    h_out       = params.h_out          # Outside heat transfer coefficient
-    R           = params.R              # Universal gas constant
-    y_feed_CO₂  = params.y_feed_CO₂
-    y_feed_N₂   = params.y_feed_N₂
-    y_feed_H₂O  = params.y_feed_H₂O
-    μ_N₂        = params.μ_N₂           # Fluid viscosity
-    μ_CO₂       = params.μ_CO₂
-    μ_H₂O       = params.μ_H₂O
+# Unpack phys_params
+const R = phys_params.R
+const γ₁ = phys_params.γ₁
+const γ₂ = phys_params.γ₂
+const Dₘ = phys_params.Dₘ
+const μ = phys_params.μ
+const C_solid = phys_params.C_solid
+const Cₚ_CO2 = phys_params.Cₚ_CO2
+const Cₚ_H2O = phys_params.Cₚ_H2O
+const Cₚ_N2 = phys_params.Cₚ_N2
+const Cₚ_wall = phys_params.Cₚ_wall
+const MW_CO2 = phys_params.MW_CO2
+const MW_H2O = phys_params.MW_H2O
+const MW_N2  = phys_params.MW_N2
 
-    # Operating conditions for case studies
-    v_feed  = params.v_feed             # Interstitial feed velocity
-    T_feed  = params.T_feed             # Feed temperature
-    Tₐ      = params.Tₐ                 # Ambient temperature
-    Pₕ      = params.Pₕ                  # High pressure 
-    Pᵢ      = params.Pᵢ                 # Intermediate pressure
-    Pₗ       = params.Pₗ                 # Low pressure
+# Unpack col_params
+const Rᵢ = col_params.Rᵢ
+const Rₒ = col_params.Rₒ
+const L = col_params.L
+const h_L = col_params.h_L
+const h_W = col_params.h_W
 
-    # Constants for dimensionless parameteres
-    P₀     = Pₕ
-    T₀     = T_feed
-    v₀     = v_feed
-    qₛ₀    = params.qₛ₀
+# Unpack sorb_params
+const ε_bed = sorb_params.ε_bed
+const ε_total = sorb_params.ε_total
+const dₚ = sorb_params.dₚ
+const ρ_bed = sorb_params.ρ_bed
+const ρ_particle = sorb_params.ρ_particle
+const k_CO2 = sorb_params.k_CO2
+const k_H2O = sorb_params.k_H2O
+const ΔH_CO2 = sorb_params.ΔH_CO2
+const ΔH_H2O = sorb_params.ΔH_H2O
 
-    T̅_feed  = T_feed / T₀
-    T̅ₐ      = Tₐ / T₀ 
-    Dₚ      = Dₘ / τ                  # Macropore diffusivity
-    Dₗ       = 0.7Dₘ + 0.5v₀ * 2rₚ     # Axial dispersion
+# CO2 isotherm params
+const qinf0_dry_CO2 = sorb_params.qinf0_dry_CO2
+const chi_dry_CO2 = sorb_params.chi_dry_CO2
+const T0_dry_CO2 = sorb_params.T0_dry_CO2
+const DH_dry_CO2 = sorb_params.DH_dry_CO2
+const b0_dry_CO2 = sorb_params.b0_dry_CO2
+const t0_dry_CO2 = sorb_params.t0_dry_CO2
+const alfa_dry_CO2 = sorb_params.alfa_dry_CO2
 
-    # Heat of adsorption
-    ΔH_CO₂      = params.ΔH_CO₂
-    ΔH_H₂O      = params.ΔH_H₂O
+const qinf0_wet_CO2 = sorb_params.qinf0_wet_CO2
+const chi_wet_CO2 = sorb_params.chi_wet_CO2
+const T0_wet_CO2 = sorb_params.T0_wet_CO2
+const DH_wet_CO2 = sorb_params.DH_wet_CO2
+const b0_wet_CO2 = sorb_params.b0_wet_CO2
+const t0_wet_CO2 = sorb_params.t0_wet_CO2
+const alfa_wet_CO2 = sorb_params.alfa_wet_CO2
+const A = sorb_params.A
+const gamma = sorb_params.gamma
+const beta = sorb_params.beta
 
-    # Isotherms
-    q_star_CO₂ = params.q_star_CO₂ # function of temperature, partial pressure and q_H₂O
-    q_star_H₂O = params.q_star_H₂O # function of temperature and partial pressure
-    k_CO₂      = params.k_CO₂
-    k_H₂O      = params.k_H₂O
+# GAB H2O isotherm params
+const qm = sorb_params.qm
+const C = sorb_params.C
+const D = sorb_params.D
+const F = sorb_params.F
+const G = sorb_params.G
 
-    # Unpack buffers
-    μ = params.buffers["μ"]
-    ρ_gas = params.buffers["ρ_gas"]
-    Σxᵢ = params.buffers["Σxᵢ"]
+# Unpack op_params
+const u_feed = op_params.u_feed
+const T_amb = op_params.T_amb
+const T_feed = op_params.T_feed
+const P_out = op_params.P_out
+const y_CO2_feed = op_params.y_CO2_feed
+const y_H2O_feed = op_params.y_H2O_feed
+const y_N2_feed = op_params.y_N2_feed
 
-    Ω₁ = params.buffers["Ω₁"]
-    Ω₂ = params.buffers["Ω₂"]
-    Ω₃ = params.buffers["Ω₃"]
-    Ω₄ = params.buffers["Ω₄"]
-    σ_CO₂ = params.buffers["σ_CO₂"]
-    σ_H₂O = params.buffers["σ_H₂O"]
+# Other parameters than depend on the previous ones
+const ρ_gas  = P_out / (R * T_feed) * (y_CO2_feed * MW_CO2 + y_H2O_feed * MW_H2O + y_N2_feed * MW_N2) * 1e-3
+const a_wall =  π * (Rₒ^2 - Rᵢ^2)
+const D_L    = γ₁ * Dₘ + γ₂ * dₚ * u_feed / ε_bed
 
-    #────────────────────────────────────────────
-    # Unpack u and du
-    #────────────────────────────────────────────
-    # Unpack u
-    y_CO₂  = @view u[1:N]
-    y_N₂   = @view u[N+1:2N]
-    y_H₂O  = @view u[2N+1:3N]
-    x_CO₂  = @view u[3N+1:4N]
-    x_H₂O  = @view u[4N+1:5N]
-    P̅      = @view u[5N+1:6N]
-    T̅      = @view u[6N+1:7N]
-    T̅_wall = @view u[7N+1:8N]
+const c_total_feed = P_out / (R * T_feed)
+const c_N2_feed  = y_N2_feed * c_total_feed
+const c_CO2_feed = y_CO2_feed * c_total_feed
+const c_H2O_feed = y_H2O_feed * c_total_feed
+const C_gas_feed = c_CO2_feed * Cₚ_CO2 + c_H2O_feed * Cₚ_H2O + c_N2_feed * Cₚ_N2
+const K_L = D_L * C_gas_feed
 
-    # Unpack du
-    dy_CO₂  = @view du[1:N]
-    dy_N₂   = @view du[N+1:2N]
-    dy_H₂O  = @view du[2N+1:3N]
-    dx_CO₂  = @view du[3N+1:4N]
-    dx_H₂O  = @view du[4N+1:5N]
-    dP̅      = @view du[5N+1:6N]
-    dT̅      = @view du[6N+1:7N]
-    dT̅_wall = @view du[7N+1:8N]
-    
-    # μ and ρ_gas
-    @. μ = y_CO₂ * μ_CO₂ + y_H₂O * μ_H₂O + y_N₂ * μ_N₂ # viscosity in each cell
-    @. ρ_gas = P₀ / (R * T_feed) * (y_CO₂ * 44.009 + y_H₂O * 18.01528 + y_N₂ * 28.0134) * 1e-3 # gas density in each cell
+Base.@kwdef struct AdsorptionData
+    iN2     = 1
+    iCO2    = 2
+    iH2O    = 3
+    iT      = 4
+    ip      = 5
+    iT_wall = 6
+    iq_CO2  = 7
+    iq_H2O  = 8
 
-    # Dimensionless groups
-    Pe   = v₀ * L / Dₗ                                       # Peclet number
-    Peₕ  = (ε * v₀ * L) / (K_gas / (ρ_gas[1] * Cₚ_gas))      # Heat Peclet number
-    ψ    = (R * T₀ * qₛ₀) / Pₕ * (1 - ε) / ε * ρₛ
-
-    @. Σxᵢ  = x_CO₂ + x_H₂O
-    @. Ω₁   = (K_gas / (v₀ * ε * L)) / ((1 - ε) / ε * (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ))
-    @. Ω₂   = ((Cₚ_gas / R) * (P₀ / T₀)) / ((1 - ε) / ε * (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ))
-    @. Ω₃   = (ρ_gas * Cₚ_ads * qₛ₀) / (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ)
-    @. Ω₄   = (2h_in / r_in) * (L / v₀) / ((1 - ε) * (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ))
-    @. σ_CO₂ = (ρ_gas * qₛ₀ / T₀) * (- ΔH_CO₂) / (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ)
-    @. σ_H₂O = (ρ_gas * qₛ₀ / T₀) * (- ΔH_H₂O) / (ρₛ * Cₚₛ + ρ_gas * qₛ₀ * Cₚ_ads * Σxᵢ)
-
-    Π₁   = K_wall / (ρ_wall * Cₚ_wall * v₀ * L)
-    Π₂   = 2r_in * h_in / (r_out^2 - r_in^2) * L / (ρ_wall * Cₚ_wall * v₀)
-    Π₃   = 2r_out * h_out / (r_out^2 - r_in^2) * L / (ρ_wall * Cₚ_wall * v₀)
-
-    """ !info!
-    _zf means value at the cell faces. zf[j] is the value at j - 1/2
-    _left means boundary condition at Z=0
-    _right means boundary condition at Z=1
-    """
-
-    # Compute local velcoity at cell boundaries
-    v̅_zf = params.buffers["v̅_zf"]
-    compute_velocity!(v̅_zf, P̅; y_CO₂, y_H₂O, y_N₂, params, t, P̅_right=1.0)
-
-    # Compute P̅ and T̅ and y at cell faces using WENO
-    P̅_zf = params.buffers["P̅_zf"]
-    P̅_left = P̅[1] + (150μ[1] * (L * ΔZ/2)/(4rₚ²) * (1 - ε)^2 / ε^2 * 1.0 + 
-                  + 1.75 * (L * ΔZ/2) * ρ_gas[1] / (2rₚ) * (1 - ε) / ε * 1.0 * abs(1.0)) / P₀
-    P̅_right = 1
-    WENO!(P̅_zf, P̅, P̅_left, P̅_right)
-
-    T̅_zf = params.buffers["T̅_zf"]
-    T̅_left = (T̅[1] + 1.0 * Peₕ * ΔZ/2) / (1 + 1.0 * Peₕ * ΔZ/2)
-    T̅_right = T̅[N]
-    WENO!(T̅_zf, T̅, T̅_left, T̅_right)
-
-    #────────────────────────────────────────────
-    # Solid phase mass balance equation
-    #────────────────────────────────────────────
-    # H₂O
-    q_H₂O_star     = q_star_H₂O.(T₀ * T̅, P₀ * P̅ .* y_H₂O)
-    x_H₂O_star     = q_H₂O_star / qₛ₀
-    α_H₂O          = k_H₂O * L / v₀
-    @. dx_H₂O      = α_H₂O * (x_H₂O_star - x_H₂O)
-
-    # CO₂
-    q_CO₂_star     = q_star_CO₂.(T₀ * T̅, P₀ * P̅ .* y_CO₂, x_H₂O * qₛ₀)
-    x_CO₂_star     = q_CO₂_star / qₛ₀
-    α_CO₂          = k_CO₂ * L / v₀
-    @. dx_CO₂      = α_CO₂ * (x_CO₂_star - x_CO₂)
-
-    #────────────────────────────────────────────
-    # Column energy balance equation
-    #────────────────────────────────────────────
-    T̅_flux = params.buffers["T̅_flux"]
-    @. T̅_flux = v̅_zf * P̅_zf
-
-    @inbounds for j in 1:N
-        # BC for diffusion term
-        if j == 1
-            diffusion = 1/ΔZ * ((T̅[j+1] - T̅[j])/ΔZ - (-Peₕ * (T̅_feed - T̅_left)))
-        elseif j == N
-            diffusion = 1/ΔZ * (0 - (T̅[j] - T̅[j-1])/ΔZ)
-        else
-            diffusion = 1/ΔZ * ((T̅[j+1] - T̅[j])/ΔZ - (T̅[j] - T̅[j-1])/ΔZ)
-        end
-
-        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]
-        Σσⱼdxⱼ = σ_CO₂[j] * dx_CO₂[j] + σ_H₂O[j] * dx_H₂O[j]
-
-        dT̅[j]     = Ω₁[j] * diffusion +
-                    - Ω₂[j] * 1/ΔZ * (T̅_flux[j+1] - T̅_flux[j]) +
-                    - Ω₃[j] * T̅[j] * Σdxⱼ + 
-                    + Σσⱼdxⱼ +
-                    - Ω₄[j] * (T̅[j] - T̅_wall[j])
-                    - Ω₂[j] * dP̅[j]
-    end
-
-    #────────────────────────────────────────────
-    # Total mass balance equation
-    #────────────────────────────────────────────
-    P̅_flux = params.buffers["P̅_flux"]
-    @. P̅_flux = (P̅_zf / T̅_zf) * v̅_zf
-    @inbounds for j in 1:N
-        Σdxⱼ   = dx_CO₂[j] + dx_H₂O[j]
-        dP̅[j] = - T̅[j] / ΔZ * (P̅_flux[j+1] - P̅_flux[j]) - ψ * T̅[j] * Σdxⱼ + P̅[j]/T̅[j] * dT̅[j]
-    end
-
-    #────────────────────────────────────────────
-    # Component mass balance equations
-    #────────────────────────────────────────────
-    y_vars  = (y_CO₂, y_N₂, y_H₂O)
-    dy_vars = (dy_CO₂, dy_N₂, dy_H₂O)
-    dx_vars = (dx_CO₂, nothing, dx_H₂O)
-    y_feed_vals = (y_feed_CO₂, y_feed_N₂, y_feed_H₂O)
-
-    yᵢ_flux = params.buffers["y_flux"]
-    yᵢ_zf    = params.buffers["y_zf"]
-
-    @inbounds for i in 1:3  # 1:CO₂, 2:N₂, 3:H₂O
-        yᵢ       = y_vars[i]
-        dyᵢ      = dy_vars[i]
-        dxᵢ      = dx_vars[i]
-        yᵢ_feed  = y_feed_vals[i]
-
-        # Compute yᵢ at cell faces using WENO
-        yᵢ_left  = (yᵢ[1] + yᵢ_feed * Pe * ΔZ/2) / (1 + Pe * ΔZ/2)
-        yᵢ_right = yᵢ[N]
-        WENO!(yᵢ_zf, yᵢ, yᵢ_left, yᵢ_right)
-
-        @. yᵢ_flux = yᵢ_zf * (P̅_zf / T̅_zf) * v̅_zf
-
-        @inbounds for j in 1:N
-            # BC for diffusion term
-            if j == 1
-                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
-                                                - P̅_zf[j] / T̅_zf[j] * (-Pe * (yᵢ_feed - yᵢ_left)))
-            elseif j == N
-                diffusion = 1/ΔZ * (0 - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
-            else
-                diffusion = 1/ΔZ * (P̅_zf[j+1] / T̅_zf[j+1] * (yᵢ[j + 1] - yᵢ[j]) / ΔZ 
-                                                - P̅_zf[j] / T̅_zf[j] * (yᵢ[j] - yᵢ[j - 1]) / ΔZ)
-            end
-
-            if i == 2  # N₂ component
-                dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                            - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                            - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
-            else
-                dyᵢ[j] = 1/Pe * T̅[j]/P̅[j] * diffusion +
-                            - T̅[j]/P̅[j] * 1/ΔZ * (yᵢ_flux[j+1] - yᵢ_flux[j]) + 
-                            - ψ * T̅[j]/P̅[j] * dxᵢ[j] - yᵢ[j]/P̅[j] * dP̅[j] + yᵢ[j]/T̅[j] * dT̅[j]
-            end
-        end
-    end
-
-    #────────────────────────────────────────────
-    # Wall energy balance equation
-    #────────────────────────────────────────────
-    @inbounds for j in 1:N
-        if j == 1
-            diffusion = 1/ΔZ * ((T̅_wall[j+1] - T̅_wall[j])/ΔZ - (T̅_wall[j] - T̅ₐ)/(ΔZ/2))
-        elseif j == N
-            diffusion = 1/ΔZ * ((T̅ₐ - T̅_wall[j])/(ΔZ/2) - (T̅_wall[j] - T̅_wall[j-1])/ΔZ)
-        else
-            diffusion = 1/ΔZ * ((T̅_wall[j+1] - T̅_wall[j])/ΔZ - (T̅_wall[j] - T̅_wall[j-1])/ΔZ)
-        end
-
-        dT̅_wall[j] = Π₁ * diffusion + Π₂ * (T̅[j] - T̅_wall[j]) - Π₃ * (T̅_wall[j] - T̅ₐ)
-    end
+    Γ_in = 1
+    Γ_out = 2
 end
+
+darcy_velocity(u, data) = begin
+    k = - 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
+    1/k * (u[data.ip, 2] - u[data.ip, 1])
+end
+
+function flux_scharfetter_gummel(f, u, edge, data)
+    vh = darcy_velocity(u, data)
+
+    # --- Calculate effective dispersion and Péclet number ---
+    c_total_1 = u[data.iN2, 1] + u[data.iCO2, 1] + u[data.iH2O, 1]
+    c_total_2 = u[data.iN2, 2] + u[data.iCO2, 2] + u[data.iH2O, 2]
+    c_total_edge = (c_total_1 + c_total_2) / 2
+
+    # --- Compute Mole fractions ---
+    y_N2_1  = u[data.iN2, 1]  / c_total_1; y_N2_2  = u[data.iN2, 2]  / c_total_2
+    y_CO2_1 = u[data.iCO2, 1] / c_total_1; y_CO2_2 = u[data.iCO2, 2] / c_total_2
+    y_H2O_1 = u[data.iH2O, 1] / c_total_1; y_H2O_2 = u[data.iH2O, 2] / c_total_2
+
+    bp, bm = fbernoulli_pm(vh / (ε_bed * D_L))
+    f[data.iN2] = ε_bed * D_L * c_total_edge * (bm * y_N2_1 - bp * y_N2_2)
+    f[data.iCO2] = ε_bed * D_L * c_total_edge * (bm * y_CO2_1 - bp * y_CO2_2)
+    f[data.iH2O] = ε_bed * D_L * c_total_edge * (bm * y_H2O_1 - bp * y_H2O_2)
+
+    # --- Thermal Flux (Energy Balance) ---
+    C_gas_1 = u[data.iCO2,1]*Cₚ_CO2 + u[data.iH2O,1]*Cₚ_H2O + u[data.iN2,1]*Cₚ_N2
+    C_gas_2 = u[data.iCO2,2]*Cₚ_CO2 + u[data.iH2O,2]*Cₚ_H2O + u[data.iN2,2]*Cₚ_N2
+    C_gas_edge = (C_gas_1 + C_gas_2) / 2
+
+    T_1     = u[data.iT, 1];   T_2     = u[data.iT, 2]
+    D = ε_bed * K_L
+    bp, bm = fbernoulli_pm(vh * C_gas_edge / D)
+    f[data.iT] = D * (bm * T_1 - bp * T_2)
+end
+
+function storage(y, u, node, data)
+    y[data.iN2]  = ε_total * u[data.iN2]
+    y[data.iCO2] = ε_total * u[data.iCO2]
+    y[data.iH2O] = ε_total * u[data.iH2O]
+
+    C_gas = u[data.iCO2] * Cₚ_CO2 + u[data.iH2O] * Cₚ_H2O + u[data.iN2] * Cₚ_N2
+    C_ads = u[data.iq_CO2] * Cₚ_CO2 + u[data.iq_H2O] * Cₚ_H2O
+    y[data.iT]   = (ε_total * C_gas + ρ_bed * C_solid + ρ_bed * C_ads) * u[data.iT] - ε_total * u[data.ip]
+    y[data.iT_wall] = u[data.iT_wall]
+
+    y[data.iq_CO2] = u[data.iq_CO2]
+    y[data.iq_H2O] = u[data.iq_H2O]
+end
+
+function reaction(y, u, node, data)
+    # P = (c_N2 + c_CO2 + c_H2O) * R * T
+    c_total_node = u[data.iN2] + u[data.iCO2] + u[data.iH2O]
+    y[data.ip] = u[data.ip] - c_total_node * R * u[data.iT]
+
+    # T_wall term
+    y[data.iT] = 2h_L/Rᵢ * (u[data.iT] - u[data.iT_wall])
+    y[data.iT_wall] = - 2π/(Cₚ_wall * a_wall) * (h_L * Rᵢ * (u[data.iT] - u[data.iT_wall]) - h_W * Rₒ * (u[data.iT_wall] - T_amb))
+
+    # q term
+    p_H2O = u[data.ip] * u[data.iH2O] / c_total_node
+    p_CO2 = u[data.ip] * u[data.iCO2] / c_total_node
+    qstar_H2O = q_star_H2O(qm, C, D, F, G, u[data.iT], p_H2O)
+    qstar_CO2 = q_star_CO2(qinf0_dry_CO2, chi_dry_CO2, T0_dry_CO2, b0_dry_CO2, DH_dry_CO2, t0_dry_CO2, alfa_dry_CO2, u[data.iT], R, p_CO2, gamma, beta, qstar_H2O)
+
+    y[data.iq_H2O] = - k_H2O * (qstar_H2O - u[data.iq_H2O])
+    y[data.iq_CO2] = - k_CO2 * (qstar_CO2 - u[data.iq_CO2])
+
+    y[data.iH2O] = ρ_bed * k_H2O * (qstar_H2O - u[data.iq_H2O])
+    y[data.iCO2] = ρ_bed * k_CO2 * (qstar_CO2 - u[data.iq_CO2])
+
+    y[data.iT] += ρ_bed * ΔH_CO2 * k_CO2 * (qstar_CO2 - u[data.iq_CO2]) + ρ_bed * ΔH_H2O * k_H2O * (qstar_H2O - u[data.iq_H2O])
+end
+
+function bcondition(y, u, bnode, data)
+    # Boundary conditions at z=0
+    boundary_neumann!(y, u, bnode; species=data.iN2, region=data.Γ_in, value = u_feed * c_N2_feed)
+    boundary_neumann!(y, u, bnode; species=data.iCO2, region=data.Γ_in, value = u_feed * c_CO2_feed)
+    boundary_neumann!(y, u, bnode; species=data.iH2O, region=data.Γ_in, value = u_feed * c_H2O_feed)
+    boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = u_feed * C_gas_feed * T_feed)
+
+    # boundary conditions at z=1
+    boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = P_out)
+end
+
+# Outflow boundary conditions
+function boutflow(y, u, edge, data)
+    vh = darcy_velocity(u, data)
+    y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
+    y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
+    y[data.iH2O]  = -vh * u[data.iH2O, outflownode(edge)]
+
+    C_gas = u[data.iCO2, outflownode(edge)] * Cₚ_CO2 + 
+            u[data.iH2O, outflownode(edge)] * Cₚ_H2O + 
+            u[data.iN2, outflownode(edge)] * Cₚ_N2
+
+    y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
+end
+
+N = 10
+X = range(0, L, N)
+data = AdsorptionData(;)
+grid = VoronoiFVM.Grid(X)
+sys = VoronoiFVM.System(
+    grid;
+    storage,
+    flux = flux_scharfetter_gummel,
+    reaction,
+    bcondition,
+    boutflow,
+    data,
+    outflowboundaries = [data.Γ_out],
+    species = [1,2,3,4,5,6,7,8]
+)
+
+inival = unknowns(sys)
+
+inival[data.ip, :]      .= P_out
+inival[data.iT, :]      .= T_amb
+inival[data.iT_wall, :] .= T_amb
+inival[data.iN2, :]     .= c_total_feed # Initially 100% N2
+inival[data.iCO2, :]    .= 0.0
+inival[data.iH2O, :]    .= 0.0
+inival[data.iq_CO2, :]  .= 0.0
+inival[data.iq_H2O, :]  .= 0.0
+
+state = VoronoiFVM.SystemState(sys)
+problem = ODEProblem(state, inival, (0, 3600))
+@time odesol = solve(problem, Rodas5P())
+sol = reshape(odesol, sys; state)
+
+idx = 1:101
+plot(idx, [sol.u[i][data.iq_CO2, end] for i in idx])
+plot(sol.u[end][data.iCO2 , :], title=sol.t[end])
+plot(sol.u[end][data.iCO2 , :], title=sol.t[end])
