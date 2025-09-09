@@ -1,6 +1,7 @@
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
@@ -23,3 +24,4 @@ SparseConnectivityTracer = "9f842d2f-2579-4b1d-911e-f412cf18a3f5"
 Sundials = "c3572dad-4567-51f8-b174-8c6c989267f4"
 Trixi = "a7f1ee26-1774-49b1-8366-f1abc58fbfcb"
 VoronoiFVM = "82b139dc-5afc-11e9-35da-9b9bdfd336f3"
+XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"

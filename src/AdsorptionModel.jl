@@ -94,20 +94,6 @@ const c_H2O_feed = y_H2O_feed * c_total_feed
 const C_gas_feed = c_CO2_feed * Cₚ_CO2 + c_H2O_feed * Cₚ_H2O + c_N2_feed * Cₚ_N2
 const K_L = D_L * C_gas_feed
 
-Base.@kwdef struct AdsorptionData
-    iN2     = 1
-    iCO2    = 2
-    iH2O    = 3
-    iT      = 4
-    ip      = 5
-    iT_wall = 6
-    iq_CO2  = 7
-    iq_H2O  = 8
-
-    Γ_in = 1
-    Γ_out = 2
-end
-
 darcy_velocity(u, data) = begin
     k = - 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
     1/k * (u[data.ip, 2] - u[data.ip, 1])
@@ -205,42 +191,59 @@ function boutflow(y, u, edge, data)
     y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
 end
 
-N = 100
-X = range(0, L, N)
-data = AdsorptionData(;)
-grid = VoronoiFVM.Grid(X)
-sys = VoronoiFVM.System(
-    grid;
-    storage,
-    flux = flux_exponential,
-    reaction,
-    bcondition,
-    boutflow,
-    data,
-    outflowboundaries = [data.Γ_out],
-    species = [1,2,3,4,5,6,7,8]
-)
+Base.@kwdef struct AdsorptionData
+    iN2     = 1
+    iCO2    = 2
+    iH2O    = 3
+    iT      = 4
+    ip      = 5
+    iT_wall = 6
+    iq_CO2  = 7
+    iq_H2O  = 8
 
-inival = unknowns(sys)
+    Γ_in = 1
+    Γ_out = 2
+end
 
-inival[data.ip, :]      .= P_out
-inival[data.iT, :]      .= T_amb
-inival[data.iT_wall, :] .= T_amb
-inival[data.iN2, :]     .= c_total_feed # Initially 100% N2
-inival[data.iCO2, :]    .= 0.0
-inival[data.iH2O, :]    .= 0.0
-inival[data.iq_CO2, :]  .= 0.0
-inival[data.iq_H2O, :]  .= 0.0
+function simulation(;storage=storage, flux=flux_exponential, reaction=reaction, bcondition=bcondition, boutflow=boutflow, N=10, tads=3600)
+    X = range(0, L, N)
+    data = AdsorptionData(;)
+    grid = VoronoiFVM.Grid(X)
+    sys = VoronoiFVM.System(
+        grid;
+        storage,
+        flux,
+        reaction,
+        bcondition,
+        boutflow,
+        data,
+        outflowboundaries = [data.Γ_out],
+        species = [1,2,3,4,5,6,7,8]
+    )
 
-state = VoronoiFVM.SystemState(sys)
-problem = ODEProblem(state, inival, (0, 3600*2))
-@time odesol = solve(problem, Rodas5P())
-sol(t) = reshape(odesol(t), sys)
+    inival = unknowns(sys)
 
-t = 3600
-plot(sol(t)[data.iCO2, :], title="CO2 concentration in column at time=$(t)s")
+    inival[data.ip, :]      .= P_out
+    inival[data.iT, :]      .= T_amb
+    inival[data.iT_wall, :] .= T_amb
+    inival[data.iN2, :]     .= c_total_feed # Initially 100% N2
+    inival[data.iCO2, :]    .= 0.0
+    inival[data.iH2O, :]    .= 0.0
+    inival[data.iq_CO2, :]  .= 0.0
+    inival[data.iq_H2O, :]  .= 0.0
 
-ts = 1:3600*2
+    state = VoronoiFVM.SystemState(sys)
+    problem = ODEProblem(state, inival, (0, tads))
+    odesol = solve(problem, Rodas5P())
+    sol(t) = reshape(odesol(t), sys)
 
-plot(ts, [sol(t)[data.iCO2, end] / (sol(t)[data.iCO2, end] + sol(t)[data.iN2, end] +sol(t)[data.iH2O, end])  for t in ts], title="Concentration of CO2 at the end of the column")
-xlabel!("Time (s)")
+    return sol, data
+end
+
+# t = 3600
+# plot(sol(t)[data.iCO2, :], title="CO2 concentration in column at time=$(t)s")
+
+# ts = 1:3600*2
+
+# plot(ts, [sol(t)[data.iCO2, end] / (sol(t)[data.iCO2, end] + sol(t)[data.iN2, end] +sol(t)[data.iH2O, end])  for t in ts], title="Concentration of CO2 at the end of the column")
+# xlabel!("Time (s)")
