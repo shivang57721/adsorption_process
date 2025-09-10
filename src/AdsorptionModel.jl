@@ -8,25 +8,24 @@ using LinearAlgebra
 using Plots
 include("params.jl")
 
-phys_params = PhysicalParams()
+phys_consts = PhysicalConstants()
 col_params = ColumnParams()
 sorb_params = SorbentParams()
-op_params = OperatingParams()
 
-# Unpack phys_params
-const R = phys_params.R
-const γ₁ = phys_params.γ₁
-const γ₂ = phys_params.γ₂
-const Dₘ = phys_params.Dₘ
-const μ = phys_params.μ
-const C_solid = phys_params.C_solid
-const Cₚ_CO2 = phys_params.Cₚ_CO2
-const Cₚ_H2O = phys_params.Cₚ_H2O
-const Cₚ_N2 = phys_params.Cₚ_N2
-const Cₚ_wall = phys_params.Cₚ_wall
-const MW_CO2 = phys_params.MW_CO2
-const MW_H2O = phys_params.MW_H2O
-const MW_N2  = phys_params.MW_N2
+# Unpack phys_consts
+const R = phys_consts.R
+const γ₁ = phys_consts.γ₁
+const γ₂ = phys_consts.γ₂
+const Dₘ = phys_consts.Dₘ
+const μ = phys_consts.μ
+const C_solid = phys_consts.C_solid
+const Cₚ_CO2 = phys_consts.Cₚ_CO2
+const Cₚ_H2O = phys_consts.Cₚ_H2O
+const Cₚ_N2 = phys_consts.Cₚ_N2
+const Cₚ_wall = phys_consts.Cₚ_wall
+const MW_CO2 = phys_consts.MW_CO2
+const MW_H2O = phys_consts.MW_H2O
+const MW_N2  = phys_consts.MW_N2
 
 # Unpack col_params
 const Rᵢ = col_params.Rᵢ
@@ -34,6 +33,7 @@ const Rₒ = col_params.Rₒ
 const L = col_params.L
 const h_L = col_params.h_L
 const h_W = col_params.h_W
+const a_wall =  π * (Rₒ^2 - Rᵢ^2)
 
 # Unpack sorb_params
 const ε_bed = sorb_params.ε_bed
@@ -73,33 +73,22 @@ const D = sorb_params.D
 const F = sorb_params.F
 const G = sorb_params.G
 
-# Unpack op_params
-const u_feed = op_params.u_feed
-const T_amb = op_params.T_amb
-const T_feed = op_params.T_feed
-const P_out = op_params.P_out
-const y_CO2_feed = op_params.y_CO2_feed
-const y_H2O_feed = op_params.y_H2O_feed
-const y_N2_feed = op_params.y_N2_feed
-
-# Other parameters than depend on the previous ones
-const ρ_gas  = P_out / (R * T_feed) * (y_CO2_feed * MW_CO2 + y_H2O_feed * MW_H2O + y_N2_feed * MW_N2) * 1e-3
-const a_wall =  π * (Rₒ^2 - Rᵢ^2)
-const D_L    = γ₁ * Dₘ + γ₂ * dₚ * u_feed / ε_bed
-
-const c_total_feed = P_out / (R * T_feed)
-const c_N2_feed  = y_N2_feed * c_total_feed
-const c_CO2_feed = y_CO2_feed * c_total_feed
-const c_H2O_feed = y_H2O_feed * c_total_feed
-const C_gas_feed = c_CO2_feed * Cₚ_CO2 + c_H2O_feed * Cₚ_H2O + c_N2_feed * Cₚ_N2
-const K_L = D_L * C_gas_feed
-
 darcy_velocity(u, data) = begin
     k = - 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
     1/k * (u[data.ip, 2] - u[data.ip, 1])
 end
 
+ergun_velocity(u, data) = begin
+    params = data.params
+    ρ_gas = params.P_out / (R * params.T_amb) * (params.y_CO2_feed * MW_CO2 + params.y_H2O_feed * MW_H2O + params.y_N2_feed * MW_N2) * 1e-3
+    b = 150μ * (1 - ε_bed)/(dₚ * 1.75 * ρ_gas)
+    c = ε_bed^ 3 * dₚ / (1.75 * ρ_gas * (1 - ε_bed))
+    dpdz = u[data.ip, 1] - u[data.ip, 2]
+    sign(dpdz) * (-b + sqrt(b^2 + sign(dpdz)* 4c * dpdz))/2
+end
+
 function flux_exponential(f, u, edge, data)
+    params = data.params
     vh = darcy_velocity(u, data)
 
     # --- Calculate effective dispersion and Péclet number ---
@@ -112,10 +101,10 @@ function flux_exponential(f, u, edge, data)
     y_CO2_1 = u[data.iCO2, 1] / c_total_1; y_CO2_2 = u[data.iCO2, 2] / c_total_2
     y_H2O_1 = u[data.iH2O, 1] / c_total_1; y_H2O_2 = u[data.iH2O, 2] / c_total_2
 
-    bp, bm = fbernoulli_pm(vh / (ε_bed * D_L))
-    f[data.iN2] = ε_bed * D_L * c_total_edge * (bm * y_N2_1 - bp * y_N2_2)
-    f[data.iCO2] = ε_bed * D_L * c_total_edge * (bm * y_CO2_1 - bp * y_CO2_2)
-    f[data.iH2O] = ε_bed * D_L * c_total_edge * (bm * y_H2O_1 - bp * y_H2O_2)
+    bp, bm = fbernoulli_pm(vh / (ε_bed * params.D_L))
+    f[data.iN2] = ε_bed * params.D_L * c_total_edge * (bm * y_N2_1 - bp * y_N2_2)
+    f[data.iCO2] = ε_bed * params.D_L * c_total_edge * (bm * y_CO2_1 - bp * y_CO2_2)
+    f[data.iH2O] = ε_bed * params.D_L * c_total_edge * (bm * y_H2O_1 - bp * y_H2O_2)
 
     # --- Thermal Flux (Energy Balance) ---
     C_gas_1 = u[data.iCO2,1]*Cₚ_CO2 + u[data.iH2O,1]*Cₚ_H2O + u[data.iN2,1]*Cₚ_N2
@@ -123,7 +112,7 @@ function flux_exponential(f, u, edge, data)
     C_gas_edge = (C_gas_1 + C_gas_2) / 2
 
     T_1     = u[data.iT, 1];   T_2     = u[data.iT, 2]
-    D = ε_bed * K_L
+    D = ε_bed * params.K_L
     bp, bm = fbernoulli_pm(vh * C_gas_edge / D)
     f[data.iT] = D * (bm * T_1 - bp * T_2)
 end
@@ -143,13 +132,14 @@ function storage(y, u, node, data)
 end
 
 function reaction(y, u, node, data)
+    params = data.params
     # P = (c_N2 + c_CO2 + c_H2O) * R * T
     c_total_node = u[data.iN2] + u[data.iCO2] + u[data.iH2O]
     y[data.ip] = u[data.ip] - c_total_node * R * u[data.iT]
 
     # T_wall term
     y[data.iT] = 2h_L/Rᵢ * (u[data.iT] - u[data.iT_wall])
-    y[data.iT_wall] = - 2π/(Cₚ_wall * a_wall) * (h_L * Rᵢ * (u[data.iT] - u[data.iT_wall]) - h_W * Rₒ * (u[data.iT_wall] - T_amb))
+    y[data.iT_wall] = - 2π/(Cₚ_wall * a_wall) * (h_L * Rᵢ * (u[data.iT] - u[data.iT_wall]) - h_W * Rₒ * (u[data.iT_wall] - params.T_amb))
 
     # q term
     p_H2O = u[data.ip] * u[data.iH2O] / c_total_node
@@ -167,18 +157,22 @@ function reaction(y, u, node, data)
 end
 
 function bcondition(y, u, bnode, data)
+    params = data.params
     # Boundary conditions at z=0
-    boundary_neumann!(y, u, bnode; species=data.iN2, region=data.Γ_in, value = u_feed * c_N2_feed)
-    boundary_neumann!(y, u, bnode; species=data.iCO2, region=data.Γ_in, value = u_feed * c_CO2_feed)
-    boundary_neumann!(y, u, bnode; species=data.iH2O, region=data.Γ_in, value = u_feed * c_H2O_feed)
-    boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = u_feed * C_gas_feed * T_feed)
+    boundary_neumann!(y, u, bnode; species=data.iN2, region=data.Γ_in, value = params.u_feed * params.c_N2_feed)
+    boundary_neumann!(y, u, bnode; species=data.iCO2, region=data.Γ_in, value = params.u_feed * params.c_CO2_feed)
+    boundary_neumann!(y, u, bnode; species=data.iH2O, region=data.Γ_in, value = params.u_feed * params.c_H2O_feed)
+    boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = params.u_feed * params.C_gas_feed * params.T_feed)
 
     # boundary conditions at z=1
-    boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = P_out)
+    boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out)
 end
 
 # Outflow boundary conditions
 function boutflow(y, u, edge, data)
+    if data.params.step_name == "cooling"
+        return nothing
+    end
     vh = darcy_velocity(u, data)
     y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
     y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
@@ -203,39 +197,77 @@ Base.@kwdef struct AdsorptionData
 
     Γ_in = 1
     Γ_out = 2
+
+    params::OperatingParameters
 end
 
-function simulation(;storage=storage, flux=flux_exponential, reaction=reaction, bcondition=bcondition, boutflow=boutflow, N=10, tads=3600)
-    X = range(0, L, N)
-    data = AdsorptionData(;)
+function run_simulation(; N=10, cycle_steps, num_cycles=1)
+    for step in cycle_steps
+        update_derived_params!(step, phys_consts, sorb_params)
+    end
+
+    # --- System Initialization (only done once) ---
+    data = AdsorptionData(; params=deepcopy(cycle_steps[1]))
+    X = range(0, L, length=N)
     grid = VoronoiFVM.Grid(X)
     sys = VoronoiFVM.System(
         grid;
         storage,
-        flux,
+        flux=flux_exponential,
         reaction,
         bcondition,
         boutflow,
         data,
-        outflowboundaries = [data.Γ_out],
-        species = [1,2,3,4,5,6,7,8]
+        outflowboundaries=[data.Γ_out],
+        species=[1, 2, 3, 4, 5, 6, 7, 8]
     )
 
+    # --- Initial Conditions for the very first cycle ---
     inival = unknowns(sys)
-
-    inival[data.ip, :]      .= P_out
-    inival[data.iT, :]      .= T_amb
-    inival[data.iT_wall, :] .= T_amb
-    inival[data.iN2, :]     .= c_total_feed # Initially 100% N2
+    inival[data.ip, :]      .= cycle_steps[1].P_out
+    inival[data.iT, :]      .= cycle_steps[1].T_amb
+    inival[data.iT_wall, :] .= cycle_steps[1].T_amb
+    inival[data.iN2, :]     .= cycle_steps[1].c_total_feed
     inival[data.iCO2, :]    .= 0.0
     inival[data.iH2O, :]    .= 0.0
     inival[data.iq_CO2, :]  .= 0.0
     inival[data.iq_H2O, :]  .= 0.0
 
-    state = VoronoiFVM.SystemState(sys)
-    problem = ODEProblem(state, inival, (0, tads))
-    odesol = solve(problem, Rodas5P())
-    sol(t) = reshape(odesol(t), sys)
+    # --- Simulation Loop for Multiple Cycles ---
+    solutions = []
+    total_time = 0.0
+    u_current = inival
+
+    all_steps = repeat(cycle_steps, num_cycles)
+
+    for step in all_steps
+        copy_params!(data.params, step)
+
+        t_span = (total_time, total_time + step.duration)
+        problem = ODEProblem(VoronoiFVM.SystemState(sys), u_current, t_span)
+        odesol = solve(problem, Rodas5P())
+
+        push!(solutions, odesol)
+        
+        # Update state for the next step
+        u_current = odesol.u[end]
+        total_time = t_span[2]
+    end
+
+    # --- Generalized Solution Interpolation Function ---
+    # Pre-calculate the end time of each step
+    end_times = cumsum([s.duration for s in all_steps])
+    
+    function sol(t)
+        # Find the index of the first step that ends after time t
+        idx = findfirst(x -> t <= x, end_times)
+
+        if isnothing(idx)
+            error("Time t = $t is outside the total simulation time of $(total_time).")
+        end
+        
+        return reshape(solutions[idx](t), sys)
+    end
 
     return sol, data
 end

@@ -1,4 +1,4 @@
-Base.@kwdef struct PhysicalParams
+Base.@kwdef struct PhysicalConstants
     R::Float64 = 8.314
 
     γ₁::Float64 = 0.7
@@ -7,7 +7,7 @@ Base.@kwdef struct PhysicalParams
     μ::Float64  = 1.789e-5 # dynamic viscosity 
 
     C_solid::Float64 = 2070
-    Cₚ_CO2::Float64 = 42.46
+    Cₚ_CO2::Float64 = 42.46 # add units
     Cₚ_H2O::Float64 = 73.1
     Cₚ_N2::Float64  = 29.1
     Cₚ_wall::Float64 = 4.0e6
@@ -17,7 +17,7 @@ Base.@kwdef struct PhysicalParams
     MW_H2O::Float64 = 18
 end
 
-Base.@kwdef struct ColumnParams # Default params are Arvind
+Base.@kwdef struct ColumnParams # Default params are Young
     Rᵢ::Float64 = 0.04          # Inner radius
     Rₒ::Float64 = 0.041         # Outer radius
     L::Float64  = 0.01          # Column length
@@ -68,20 +68,72 @@ Base.@kwdef struct SorbentParams # Default params are Lewatit
     G::Float64 = -47.814  # J/molK
 end
 
-Base.@kwdef struct OperatingParams
-    u_feed::Float64 = 0.1
-    T_amb::Float64  = 298.15
-    T_feed::Float64 = 298.15
-    P_out::Float64  = 1e5
+# A struct to hold all operating and derived parameters
+mutable struct OperatingParameters
+    # Independent parameters (that you change between steps)
+    u_feed::Float64
+    T_feed::Float64
+    T_amb::Float64
+    P_out::Float64
+    y_CO2_feed::Float64
+    y_H2O_feed::Float64
+    duration::Float64
+    step_name::String
+    
+    # Dependent parameters (calculated from the above)
+    y_N2_feed::Float64
+    c_total_feed::Float64
+    c_N2_feed::Float64
+    c_CO2_feed::Float64
+    c_H2O_feed::Float64
 
-    y_CO2_feed::Float64 = 0.0004
-    y_H2O_feed::Float64 = 0.0115
-    y_N2_feed::Float64  = 1 - 0.0004 - 0.0115
+    D_L::Float64
+    C_gas_feed::Float64
+    K_L::Float64
+    
+    # Constructor to ensure derived parameters are always consistent
+    function OperatingParameters(; u_feed, T_feed, T_amb, y_CO2_feed, y_H2O_feed, P_out, duration, step_name)
+        # Create a new instance
+        p = new()
+
+        # Assign independent parameters
+        p.u_feed = u_feed
+        p.T_feed = T_feed
+        p.T_amb = T_amb
+        p.y_CO2_feed = y_CO2_feed
+        p.y_H2O_feed = y_H2O_feed
+        p.P_out = P_out
+        p.duration = duration
+        p.step_name = step_name
+        return p
+    end
 end
 
-function q_star_H2O(qm, C, D, F, G, T, p_H2O)
-    Psat_H2O(T) = 611.21 * exp((18.678 - T / 234.5) * T / (T + 273.15 - 16.01))
+# A helper function to recalculate dependent parameters
+function update_derived_params!(p::OperatingParameters, phys_consts::PhysicalConstants, sorb_params::SorbentParams)
+    p.y_N2_feed = 1.0 - p.y_CO2_feed - p.y_H2O_feed
+    p.c_total_feed = p.P_out / (phys_consts.R * p.T_feed)
+    p.c_N2_feed  = p.y_N2_feed * p.c_total_feed
+    p.c_CO2_feed = p.y_CO2_feed * p.c_total_feed
+    p.c_H2O_feed = p.y_H2O_feed * p.c_total_feed
+    
+    p.D_L = phys_consts.γ₁ * phys_consts.Dₘ + phys_consts.γ₂ * sorb_params.dₚ * p.u_feed / sorb_params.ε_bed
+    p.C_gas_feed = p.c_CO2_feed * phys_consts.Cₚ_CO2 + p.c_H2O_feed * phys_consts.Cₚ_H2O + p.c_N2_feed * phys_consts.Cₚ_N2
+    p.K_L = p.D_L * p.C_gas_feed
+    return nothing
+end
 
+function copy_params!(dest::OperatingParameters, src::OperatingParameters)
+    # This copies the values of each field from src to dest
+    for name in fieldnames(OperatingParameters)
+        setfield!(dest, name, getfield(src, name))
+    end
+    return nothing
+end
+
+Psat_H2O(T) = 611.21 * exp((18.678 - T / 234.5) * T / (T + 273.15 - 16.01))
+
+function q_star_H2O(qm, C, D, F, G, T, p_H2O)
     E1 = C - exp(D * T)
     E2_9 = F + G * T
     E10 = -44.38 * T + 57220
@@ -90,7 +142,8 @@ function q_star_H2O(qm, C, D, F, G, T, p_H2O)
 
     x = p_H2O / Psat_H2O(T - 273)
 
-    qm * k * c * x / ((1 - k * x) * (1 + (c - 1) * k * x))
+    q_star = qm * k * c * x / ((1 - k * x) * (1 + (c - 1) * k * x))
+    q_star
 end
 
 function q_star_CO2(ns0, chi, T_ref, b0, DH, t0, alfa, T, R, p_CO2, gamma, beta, q_H2O)
