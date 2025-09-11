@@ -1,71 +1,44 @@
 Base.@kwdef struct PhysicalConstants
-    R::Float64 = 8.314
+    R::Float64 = 8.314         # Ideal gas constant [J mol⁻¹ K⁻¹]
 
-    γ₁::Float64 = 0.7
-    γ₂::Float64 = 0.5
-    Dₘ::Float64 = 4.3e-6 # Molecular diffusion
-    μ::Float64  = 1.789e-5 # dynamic viscosity 
+    γ₁::Float64 = 0.7            # Axial dispersion coefficient correlation parameter [dimensionless]
+    γ₂::Float64 = 0.5            # Axial dispersion coefficient correlation parameter [dimensionless]
+    μ::Float64  = 1.789e-5      # Dynamic viscosity of the gas mixture [Pa s] or [kg m⁻¹ s⁻¹]
 
-    C_solid::Float64 = 2070
-    Cₚ_CO2::Float64 = 42.46 # add units
-    Cₚ_H2O::Float64 = 73.1
-    Cₚ_N2::Float64  = 29.1
-    Cₚ_wall::Float64 = 4.0e6
+    Cₚ_CO2::Float64 = 37.520      # Molar heat capacity of CO₂ gas [J mol⁻¹ K⁻¹]
+    Cₚ_H2O::Float64 = 34.2       # Molar heat capacity of H₂O gas [J mol⁻¹ K⁻¹]
+    Cₚ_N2::Float64  = 29.171       # Molar heat capacity of N₂ gas [J mol⁻¹ K⁻¹]
+    Cₚ_wall::Float64 = 4.0e6     # Volumetric heat capacity of the column wall (ρ_wall * C_p_wall) [J m⁻³ K⁻¹]
 
-    MW_CO2::Float64 = 44
-    MW_N2::Float64  = 28
-    MW_H2O::Float64 = 18
+    MW_CO2::Float64 = 44         # Molar weight of CO₂ [g mol⁻¹] or [kg kmol⁻¹]
+    MW_N2::Float64  = 28         # Molar weight of N₂ [g mol⁻¹] or [kg kmol⁻¹]
+    MW_H2O::Float64 = 18         # Molar weight of H₂O [g mol⁻¹] or [kg kmol⁻¹]
 end
 
 Base.@kwdef struct ColumnParams # Default params are Young
-    Rᵢ::Float64 = 0.04          # Inner radius
-    Rₒ::Float64 = 0.041         # Outer radius
-    L::Float64  = 0.01          # Column length
+    Rᵢ::Float64 = 0.04           # Inner radius of the column [m]
+    Rₒ::Float64 = 0.041          # Outer radius of the column [m]
+    L::Float64  = 0.01           # Column length [m]
 
-    h_L::Float64 = 3        # Heat transfer coefficient from inside the column to the column wall
-    h_W::Float64 = 26       # Heat transfer coefficient from column wall to environment
+    h_L::Float64 = 14            # Heat transfer coefficient from gas to column wall [W m⁻² K⁻¹]
+    h_W::Float64 = 22000         # Heat transfer coefficient from column wall to environment [W m⁻² K⁻¹]
 end
 
 Base.@kwdef struct SorbentParams # Default params are Lewatit
-    ε_bed::Float64   = 0.4
-    ε_total::Float64 = 0.54
-    dₚ::Float64      = 0.00052 # Particle size
-    ρ_bed::Float64   = 528
-    ρ_particle::Float64 = 880 # Particle density
-    k_CO2::Float64 = 0.003
-    k_H2O::Float64 = 0.0086
-    ΔH_CO2::Float64 = -70000
-    ΔH_H2O::Float64 = -46000
+    ε_bed::Float64   = 0.4       # Bed voidage (interparticle porosity) [dimensionless]
+    ε_total::Float64 = 0.54      # Total porosity (interparticle + intraparticle) [dimensionless]
+    dₚ::Float64      = 0.00052   # Particle diameter [m]
+    ρ_bed::Float64   = 528       # Bed density [kg m⁻³]
+    ρ_particle::Float64 = 880    # Particle density [kg m⁻³]
+    k_CO2::Float64 = 0.003       # Lumped mass transfer coefficient for CO₂ [s⁻¹]
+    k_H2O::Float64 = 0.0086      # Lumped mass transfer coefficient for H₂O [s⁻¹]
+    ΔH_CO2::Float64 = -70000     # Heat of adsorption for CO₂ [J mol⁻¹]
+    ΔH_H2O::Float64 = -46000     # Heat of adsorption for H₂O [J mol⁻¹]
+    Dₘ::Float64 = 1.3e-5       # Molecular diffusivity of the gas mixture [m² s⁻¹]
+    C_solid::Float64 = 1580     # Heat capacity of the solid sorbent [J kg⁻¹ K⁻¹]
 
-    # Improve these names later
-
-    # CO2 Isotherm params
-    qinf0_dry_CO2::Float64 = 4.86  # mol/kg
-    chi_dry_CO2::Float64 = 0.0
-    T0_dry_CO2::Float64 = 298.15
-    DH_dry_CO2::Float64 = -117798.0 # J/mol
-    b0_dry_CO2::Float64 = 2.85e-16 # 1/bar
-    t0_dry_CO2::Float64 = 0.209  # 0.422
-    alfa_dry_CO2::Float64 =  0.523 # 0.949
-
-    qinf0_wet_CO2::Float64 = 9.035  # mol/kg
-    chi_wet_CO2::Float64 = 0.0
-    T0_wet_CO2::Float64 = 298.15
-    DH_wet_CO2::Float64 = -203687.0 # J/mol
-    b0_wet_CO2::Float64 = 1.23e-13 # 1/bar
-    t0_wet_CO2::Float64 = 0.053  # 0.422
-    alfa_wet_CO2::Float64 =  0.053 # 0.949
-    A::Float64 = 1.532  # mol/kg
-
-    gamma::Float64 = -0.137
-    beta::Float64 = 5.612
-
-    # GAB H2O isotherm params
-    qm::Float64 = 3.63  # mol/kg
-    C::Float64 = 47110  # J/mol
-    D::Float64 = 0.023744  # 1/K
-    F::Float64 = 57706  # J/mol
-    G::Float64 = -47.814  # J/molK
+    q_star_CO2 = Toth_isotherm_CO2_modified_H2O
+    q_star_H2O = GAB_isotherm_H2O_Tfunction_Resins
 end
 
 # A struct to hold all operating and derived parameters
@@ -117,7 +90,7 @@ function update_derived_params!(p::OperatingParameters, phys_consts::PhysicalCon
     p.c_CO2_feed = p.y_CO2_feed * p.c_total_feed
     p.c_H2O_feed = p.y_H2O_feed * p.c_total_feed
     
-    p.D_L = phys_consts.γ₁ * phys_consts.Dₘ + phys_consts.γ₂ * sorb_params.dₚ * p.u_feed / sorb_params.ε_bed
+    p.D_L = phys_consts.γ₁ * sorb_params.Dₘ + phys_consts.γ₂ * sorb_params.dₚ * p.u_feed / sorb_params.ε_bed
     p.C_gas_feed = p.c_CO2_feed * phys_consts.Cₚ_CO2 + p.c_H2O_feed * phys_consts.Cₚ_H2O + p.c_N2_feed * phys_consts.Cₚ_N2
     p.K_L = p.D_L * p.C_gas_feed
     return nothing
@@ -133,7 +106,14 @@ end
 
 Psat_H2O(T) = 611.21 * exp((18.678 - T / 234.5) * T / (T + 273.15 - 16.01))
 
-function q_star_H2O(qm, C, D, F, G, T, p_H2O)
+function GAB_isotherm_H2O_Tfunction_Resins(T, p_H2O)
+    # --- GAB H2O isotherm params ---
+    qm::Float64 = 3.63            # Monolayer water capacity [mol kg⁻¹]
+    C::Float64 = 47110            # GAB energy parameter [J mol⁻¹]
+    D::Float64 = 0.023744          # GAB temperature dependence parameter [K⁻¹]
+    F::Float64 = 57706            # GAB energy parameter [J mol⁻¹]
+    G::Float64 = -47.814          # GAB energy parameter [J mol⁻¹ K⁻¹]
+
     E1 = C - exp(D * T)
     E2_9 = F + G * T
     E10 = -44.38 * T + 57220
@@ -146,7 +126,19 @@ function q_star_H2O(qm, C, D, F, G, T, p_H2O)
     q_star
 end
 
-function q_star_CO2(ns0, chi, T_ref, b0, DH, t0, alfa, T, R, p_CO2, gamma, beta, q_H2O)
+function Toth_isotherm_CO2_modified_H2O_Stampi(T, R, p_CO2, q_H2O)
+    # --- CO2 Isotherm params ---
+    ns0::Float64 = 4.86  # Saturation capacity at T0 [mol kg⁻¹]
+    chi::Float64 = 0.0      # Temperature dependence parameter for saturation capacity [dimensionless]
+    T_ref::Float64 = 298.15    # Reference temperature [K]
+    DH::Float64 = -117798.0 # Adsorption enthalpy [J mol⁻¹]
+    b0::Float64 = 2.85e-16  # Affinity constant at infinite temperature [bar⁻¹]
+    t0::Float64 = 0.209     # Heterogeneity parameter at T0 [dimensionless]
+    alfa::Float64 =  0.523  # Temperature dependence parameter for t [dimensionless]
+
+    gamma::Float64 = -0.137         # CO₂-H₂O interaction parameter for saturation capacity [kg mol⁻¹]
+    beta::Float64 = 5.612           # CO₂-H₂O interaction parameter for affinity [kg mol⁻¹]
+
     ns = ns0 * exp(chi*(1 - T / T_ref)) * (1 / (1 - gamma * q_H2O))
     b = b0 * exp(-DH / R / T) * (1 + beta * q_H2O)
     t = t0 + alfa * (1 - T_ref / T)
@@ -154,4 +146,31 @@ function q_star_CO2(ns0, chi, T_ref, b0, DH, t0, alfa, T, R, p_CO2, gamma, beta,
     p_CO2_safe = max(eps(eltype(p_CO2)), p_CO2)
 
     ns * b * p_CO2 * 1e-5 / (1 + (b * p_CO2_safe * 1e-5)^t)^(1/t)
+end
+
+function Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O)
+    ns0::Float64 = 4.86  # Saturation capacity at T0 [mol kg⁻¹]
+    chi::Float64 = 0.0      # Temperature dependence parameter for saturation capacity [dimensionless]
+    T_ref::Float64 = 298.15    # Reference temperature [K]
+    DH::Float64 = -117798.0 # Adsorption enthalpy [J mol⁻¹]
+    b0::Float64 = 2.85e-16  # Affinity constant at infinite temperature [bar⁻¹]
+    t0::Float64 = 0.209     # Heterogeneity parameter at T0 [dimensionless]
+    alfa::Float64 =  0.523  # Temperature dependence parameter for t [dimensionless]
+
+    gamma::Float64 = -0.137         # CO₂-H₂O interaction parameter for saturation capacity [kg mol⁻¹]
+    beta::Float64 = 5.612           # CO₂-H₂O interaction parameter for affinity [kg mol⁻¹]
+
+    ns = ns0 * exp(chi*(1 - T / T_ref)) * (1 / (1 - gamma * q_H2O))
+    b = b0 * exp(-DH / R / T) * (1 + beta * q_H2O)
+    t = t0 + alfa * (1 - T_ref / T)
+
+    p_CO2_safe = max(eps(eltype(p_CO2)), p_CO2)
+    
+    if t ≥ 0
+        q_star = ns * b * p_CO2 * 1e-5 / (1 + (b * p_CO2_safe * 1e-5) ^ t) ^ (1/t)
+    else
+        q_star = ns * (1 + (b * p_CO2_safe * 1e-5) ^ (-t)) ^ (-1/t)
+    end
+
+    return q_star
 end

@@ -16,9 +16,7 @@ sorb_params = SorbentParams()
 const R = phys_consts.R
 const γ₁ = phys_consts.γ₁
 const γ₂ = phys_consts.γ₂
-const Dₘ = phys_consts.Dₘ
 const μ = phys_consts.μ
-const C_solid = phys_consts.C_solid
 const Cₚ_CO2 = phys_consts.Cₚ_CO2
 const Cₚ_H2O = phys_consts.Cₚ_H2O
 const Cₚ_N2 = phys_consts.Cₚ_N2
@@ -45,33 +43,11 @@ const k_CO2 = sorb_params.k_CO2
 const k_H2O = sorb_params.k_H2O
 const ΔH_CO2 = sorb_params.ΔH_CO2
 const ΔH_H2O = sorb_params.ΔH_H2O
+const Dₘ = sorb_params.Dₘ
+const C_solid = sorb_params.C_solid
 
-# CO2 isotherm params
-const qinf0_dry_CO2 = sorb_params.qinf0_dry_CO2
-const chi_dry_CO2 = sorb_params.chi_dry_CO2
-const T0_dry_CO2 = sorb_params.T0_dry_CO2
-const DH_dry_CO2 = sorb_params.DH_dry_CO2
-const b0_dry_CO2 = sorb_params.b0_dry_CO2
-const t0_dry_CO2 = sorb_params.t0_dry_CO2
-const alfa_dry_CO2 = sorb_params.alfa_dry_CO2
-
-const qinf0_wet_CO2 = sorb_params.qinf0_wet_CO2
-const chi_wet_CO2 = sorb_params.chi_wet_CO2
-const T0_wet_CO2 = sorb_params.T0_wet_CO2
-const DH_wet_CO2 = sorb_params.DH_wet_CO2
-const b0_wet_CO2 = sorb_params.b0_wet_CO2
-const t0_wet_CO2 = sorb_params.t0_wet_CO2
-const alfa_wet_CO2 = sorb_params.alfa_wet_CO2
-const A = sorb_params.A
-const gamma = sorb_params.gamma
-const beta = sorb_params.beta
-
-# GAB H2O isotherm params
-const qm = sorb_params.qm
-const C = sorb_params.C
-const D = sorb_params.D
-const F = sorb_params.F
-const G = sorb_params.G
+q_star_H2O = sorb_params.q_star_H2O
+q_star_CO2 = sorb_params.q_star_CO2
 
 darcy_velocity(u, data) = begin
     k = - 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
@@ -89,7 +65,7 @@ end
 
 function flux_exponential(f, u, edge, data)
     params = data.params
-    vh = darcy_velocity(u, data)
+    vh = ergun_velocity(u, data)
 
     # --- Calculate effective dispersion and Péclet number ---
     c_total_1 = u[data.iN2, 1] + u[data.iCO2, 1] + u[data.iH2O, 1]
@@ -125,6 +101,7 @@ function storage(y, u, node, data)
     C_gas = u[data.iCO2] * Cₚ_CO2 + u[data.iH2O] * Cₚ_H2O + u[data.iN2] * Cₚ_N2
     C_ads = u[data.iq_CO2] * Cₚ_CO2 + u[data.iq_H2O] * Cₚ_H2O
     y[data.iT]   = (ε_total * C_gas + ρ_bed * C_solid + ρ_bed * C_ads) * u[data.iT] - ε_total * u[data.ip]
+    
     y[data.iT_wall] = u[data.iT_wall]
 
     y[data.iq_CO2] = u[data.iq_CO2]
@@ -144,8 +121,8 @@ function reaction(y, u, node, data)
     # q term
     p_H2O = u[data.ip] * u[data.iH2O] / c_total_node
     p_CO2 = u[data.ip] * u[data.iCO2] / c_total_node
-    qstar_H2O = q_star_H2O(qm, C, D, F, G, u[data.iT], p_H2O)
-    qstar_CO2 = q_star_CO2(qinf0_dry_CO2, chi_dry_CO2, T0_dry_CO2, b0_dry_CO2, DH_dry_CO2, t0_dry_CO2, alfa_dry_CO2, u[data.iT], R, p_CO2, gamma, beta, qstar_H2O)
+    qstar_H2O = q_star_H2O(u[data.iT], p_H2O)
+    qstar_CO2 = q_star_CO2(u[data.iT], R, p_CO2, qstar_H2O)
 
     y[data.iq_H2O] = - k_H2O * (qstar_H2O - u[data.iq_H2O])
     y[data.iq_CO2] = - k_CO2 * (qstar_CO2 - u[data.iq_CO2])
@@ -165,15 +142,17 @@ function bcondition(y, u, bnode, data)
     boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = params.u_feed * params.C_gas_feed * params.T_feed)
 
     # boundary conditions at z=1
+    # if params.step_name != "Cooling"
     boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out)
+    # end
 end
 
 # Outflow boundary conditions
 function boutflow(y, u, edge, data)
-    if data.params.step_name == "cooling"
-        return nothing
-    end
-    vh = darcy_velocity(u, data)
+    # if data.params.step_name == "Cooling"
+    #     return nothing
+    # end
+    vh = ergun_velocity(u, data)
     y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
     y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
     y[data.iH2O]  = -vh * u[data.iH2O, outflownode(edge)]
@@ -241,11 +220,12 @@ function run_simulation(; N=10, cycle_steps, num_cycles=1)
     all_steps = repeat(cycle_steps, num_cycles)
 
     for step in all_steps
+        println("Running step $(step.step_name)")
         copy_params!(data.params, step)
 
         t_span = (total_time, total_time + step.duration)
         problem = ODEProblem(VoronoiFVM.SystemState(sys), u_current, t_span)
-        odesol = solve(problem, Rodas5P())
+        odesol = solve(problem, Rodas5P(), abstol=1e-6, reltol=1e-6)
 
         push!(solutions, odesol)
         
