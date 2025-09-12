@@ -47,11 +47,13 @@ mutable struct OperatingParameters
     u_feed::Float64
     T_feed::Float64
     T_amb::Float64
-    P_out::Float64
     y_CO2_feed::Float64
     y_H2O_feed::Float64
     duration::Float64
     step_name::String
+
+    P_out::Float64
+    P_out_func::Function
     
     # Dependent parameters (calculated from the above)
     y_N2_feed::Float64
@@ -73,11 +75,12 @@ mutable struct OperatingParameters
         p.u_feed = u_feed
         p.T_feed = T_feed
         p.T_amb = T_amb
+        p.P_out = P_out
         p.y_CO2_feed = y_CO2_feed
         p.y_H2O_feed = y_H2O_feed
-        p.P_out = P_out
         p.duration = duration
         p.step_name = step_name
+
         return p
     end
 end
@@ -167,6 +170,11 @@ function Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O)
     p_CO2_safe = max(eps(eltype(p_CO2)), p_CO2)
     
     if t ≥ 0
+        if (b * p_CO2_safe * 1e-5) < 0
+            @show b.value
+            @show q_H2O
+            @show p_CO2_safe.value
+        end
         q_star = ns * b * p_CO2 * 1e-5 / (1 + (b * p_CO2_safe * 1e-5) ^ t) ^ (1/t)
     else
         q_star = ns * (1 + (b * p_CO2_safe * 1e-5) ^ (-t)) ^ (-1/t)

@@ -65,7 +65,7 @@ end
 
 function flux_exponential(f, u, edge, data)
     params = data.params
-    vh = ergun_velocity(u, data)
+    vh = darcy_velocity(u, data)
 
     # --- Calculate effective dispersion and Péclet number ---
     c_total_1 = u[data.iN2, 1] + u[data.iCO2, 1] + u[data.iH2O, 1]
@@ -106,6 +106,9 @@ function storage(y, u, node, data)
 
     y[data.iq_CO2] = u[data.iq_CO2]
     y[data.iq_H2O] = u[data.iq_H2O]
+
+    # τ_p = 1.0e-8 # A small relaxation time for pressure
+    # y[data.ip] = τ_p * u[data.ip]
 end
 
 function reaction(y, u, node, data)
@@ -117,6 +120,12 @@ function reaction(y, u, node, data)
     # T_wall term
     y[data.iT] = 2h_L/Rᵢ * (u[data.iT] - u[data.iT_wall])
     y[data.iT_wall] = - 2π/(Cₚ_wall * a_wall) * (h_L * Rᵢ * (u[data.iT] - u[data.iT_wall]) - h_W * Rₒ * (u[data.iT_wall] - params.T_amb))
+
+    if u[data.ip] < 0
+        @show node.time
+        @show data.params.P_out_func(node.time)
+        @show u[data.ip].value
+    end
 
     # q term
     p_H2O = u[data.ip] * u[data.iH2O] / c_total_node
@@ -142,17 +151,17 @@ function bcondition(y, u, bnode, data)
     boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = params.u_feed * params.C_gas_feed * params.T_feed)
 
     # boundary conditions at z=1
-    # if params.step_name != "Cooling"
-    boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out)
-    # end
+    if params.step_name != "Cooling"
+        boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out_func(bnode.time))
+    end
 end
 
 # Outflow boundary conditions
 function boutflow(y, u, edge, data)
-    # if data.params.step_name == "Cooling"
-    #     return nothing
-    # end
-    vh = ergun_velocity(u, data)
+    if data.params.step_name == "Cooling"
+        return nothing
+    end
+    vh = darcy_velocity(u, data)
     y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
     y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
     y[data.iH2O]  = -vh * u[data.iH2O, outflownode(edge)]
@@ -214,39 +223,34 @@ function run_simulation(; N=10, cycle_steps, num_cycles=1)
 
     # --- Simulation Loop for Multiple Cycles ---
     solutions = []
-    total_time = 0.0
     u_current = inival
 
     all_steps = repeat(cycle_steps, num_cycles)
 
     for step in all_steps
         println("Running step $(step.step_name)")
+        P_initial = reshape(u_current, sys)[data.ip, end]
+        step.P_out_func = t -> step.P_out + (P_initial - step.P_out) * exp(- 0.1 * t)
         copy_params!(data.params, step)
 
-        t_span = (total_time, total_time + step.duration)
-        problem = ODEProblem(VoronoiFVM.SystemState(sys), u_current, t_span)
-        odesol = solve(problem, Rodas5P(), abstol=1e-6, reltol=1e-6)
+        problem = ODEProblem(VoronoiFVM.SystemState(sys), u_current, (0, step.duration))
+        odesol = solve(problem, Rodas5P())
 
         push!(solutions, odesol)
         
         # Update state for the next step
         u_current = odesol.u[end]
-        total_time = t_span[2]
     end
 
     # --- Generalized Solution Interpolation Function ---
     # Pre-calculate the end time of each step
     end_times = cumsum([s.duration for s in all_steps])
+    start_times = start_times = [0; end_times[1:end-1]]
     
     function sol(t)
         # Find the index of the first step that ends after time t
         idx = findfirst(x -> t <= x, end_times)
-
-        if isnothing(idx)
-            error("Time t = $t is outside the total simulation time of $(total_time).")
-        end
-        
-        return reshape(solutions[idx](t), sys)
+        return reshape(solutions[idx](t - start_times[idx]), sys)
     end
 
     return sol, data
