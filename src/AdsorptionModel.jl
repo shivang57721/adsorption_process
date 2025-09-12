@@ -3,6 +3,7 @@ Simulation of adsorption equations with VoronoiFVM.jl
 """
 
 using DifferentialEquations
+using Sundials
 using VoronoiFVM
 using LinearAlgebra
 using Plots
@@ -65,7 +66,7 @@ end
 
 function flux_exponential(f, u, edge, data)
     params = data.params
-    vh = darcy_velocity(u, data)
+    vh = ergun_velocity(u, data)
 
     # --- Calculate effective dispersion and Péclet number ---
     c_total_1 = u[data.iN2, 1] + u[data.iCO2, 1] + u[data.iH2O, 1]
@@ -106,9 +107,6 @@ function storage(y, u, node, data)
 
     y[data.iq_CO2] = u[data.iq_CO2]
     y[data.iq_H2O] = u[data.iq_H2O]
-
-    # τ_p = 1.0e-8 # A small relaxation time for pressure
-    # y[data.ip] = τ_p * u[data.ip]
 end
 
 function reaction(y, u, node, data)
@@ -120,12 +118,6 @@ function reaction(y, u, node, data)
     # T_wall term
     y[data.iT] = 2h_L/Rᵢ * (u[data.iT] - u[data.iT_wall])
     y[data.iT_wall] = - 2π/(Cₚ_wall * a_wall) * (h_L * Rᵢ * (u[data.iT] - u[data.iT_wall]) - h_W * Rₒ * (u[data.iT_wall] - params.T_amb))
-
-    if u[data.ip] < 0
-        @show node.time
-        @show data.params.P_out_func(node.time)
-        @show u[data.ip].value
-    end
 
     # q term
     p_H2O = u[data.ip] * u[data.iH2O] / c_total_node
@@ -144,33 +136,54 @@ end
 
 function bcondition(y, u, bnode, data)
     params = data.params
-    # Boundary conditions at z=0
+    
+    # Inlet feed flow boundary conditions
     boundary_neumann!(y, u, bnode; species=data.iN2, region=data.Γ_in, value = params.u_feed * params.c_N2_feed)
     boundary_neumann!(y, u, bnode; species=data.iCO2, region=data.Γ_in, value = params.u_feed * params.c_CO2_feed)
     boundary_neumann!(y, u, bnode; species=data.iH2O, region=data.Γ_in, value = params.u_feed * params.c_H2O_feed)
     boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = params.u_feed * params.C_gas_feed * params.T_feed)
 
-    # boundary conditions at z=1
-    if params.step_name != "Cooling"
+    # Dirichlet boundary conditions for Pressure
+    if params.step_name == Pressurization
+        boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_in, value = params.P_out_func(bnode.time))
+    elseif params.step_name != Cooling
         boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out_func(bnode.time))
     end
 end
 
 # Outflow boundary conditions
 function boutflow(y, u, edge, data)
-    if data.params.step_name == "Cooling"
+    params = data.params
+    if params.step_name == Cooling
+        # Both sides are closed
         return nothing
     end
-    vh = darcy_velocity(u, data)
-    y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
-    y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
-    y[data.iH2O]  = -vh * u[data.iH2O, outflownode(edge)]
+    
+    if params.step_name == Pressurization
+        # Left boundary is open
+        if outflownode(edge) == data.Γ_in
+            vh = ergun_velocity(u, data)
+            y[data.iN2] = -vh * params.c_N2_feed
+            y[data.iCO2]  = -vh * params.c_CO2_feed
+            y[data.iH2O]  = -vh * params.c_H2O_feed
 
-    C_gas = u[data.iCO2, outflownode(edge)] * Cₚ_CO2 + 
-            u[data.iH2O, outflownode(edge)] * Cₚ_H2O + 
-            u[data.iN2, outflownode(edge)] * Cₚ_N2
+            y[data.iT]   = -vh * params.C_gas_feed * params.T_feed
+        end
+    else
+        # Right boundary is open
+        if outflownode(edge) == data.Γ_out
+            vh = ergun_velocity(u, data)
+            y[data.iN2]   = -vh * u[data.iN2, outflownode(edge)]
+            y[data.iCO2]  = -vh * u[data.iCO2, outflownode(edge)]
+            y[data.iH2O]  = -vh * u[data.iH2O, outflownode(edge)]
 
-    y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
+            C_gas = u[data.iCO2, outflownode(edge)] * Cₚ_CO2 + 
+                    u[data.iH2O, outflownode(edge)] * Cₚ_H2O + 
+                    u[data.iN2, outflownode(edge)] * Cₚ_N2
+
+            y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
+        end
+    end
 end
 
 Base.@kwdef struct AdsorptionData
@@ -206,14 +219,14 @@ function run_simulation(; N=10, cycle_steps, num_cycles=1)
         bcondition,
         boutflow,
         data,
-        outflowboundaries=[data.Γ_out],
+        outflowboundaries=[data.Γ_in, data.Γ_out],
         species=[1, 2, 3, 4, 5, 6, 7, 8]
     )
 
     # --- Initial Conditions for the very first cycle ---
     inival = unknowns(sys)
     inival[data.ip, :]      .= cycle_steps[1].P_out
-    inival[data.iT, :]      .= cycle_steps[1].T_amb
+    inival[data.iT, :]      .= cycle_steps[1].T_feed
     inival[data.iT_wall, :] .= cycle_steps[1].T_amb
     inival[data.iN2, :]     .= cycle_steps[1].c_total_feed
     inival[data.iCO2, :]    .= 0.0
@@ -229,12 +242,22 @@ function run_simulation(; N=10, cycle_steps, num_cycles=1)
 
     for step in all_steps
         println("Running step $(step.step_name)")
-        P_initial = reshape(u_current, sys)[data.ip, end]
-        step.P_out_func = t -> step.P_out + (P_initial - step.P_out) * exp(- 0.1 * t)
+        if step.step_name == PressurizationReset # Doesn't work currently
+            u_current[data.ip, :]      .= step.P_out
+            u_current[data.iCO2, :]    .= step.c_CO2_feed
+            u_current[data.iH2O, :]    .= step.c_H2O_feed
+            u_current[data.iN2, :]     .= step.c_N2_feed
+            u_current[data.iT, :]      .= step.T_feed
+            u_current[data.iT_wall, :] .= step.T_feed
+            continue
+        end
+
+        step.P_out_func = t -> step.P_out + (u_current[data.ip, end] - step.P_out) * exp(- 0.11 * t)
         copy_params!(data.params, step)
 
         problem = ODEProblem(VoronoiFVM.SystemState(sys), u_current, (0, step.duration))
-        odesol = solve(problem, Rodas5P())
+        # odesol = solve(problem, Rodas5P(), reltol=1e-5, abstol=1e-5)
+        odesol = solve(problem, FBDF())#, reltol = 1e-8, abstol = 1e-8)
 
         push!(solutions, odesol)
         

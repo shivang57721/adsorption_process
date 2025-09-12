@@ -42,6 +42,7 @@ Base.@kwdef struct SorbentParams # Default params are Lewatit
 end
 
 # A struct to hold all operating and derived parameters
+@enum StepType Adsorption Heating Desorption Cooling Pressurization PressurizationReset
 mutable struct OperatingParameters
     # Independent parameters (that you change between steps)
     u_feed::Float64
@@ -50,7 +51,7 @@ mutable struct OperatingParameters
     y_CO2_feed::Float64
     y_H2O_feed::Float64
     duration::Float64
-    step_name::String
+    step_name::StepType
 
     P_out::Float64
     P_out_func::Function
@@ -96,6 +97,7 @@ function update_derived_params!(p::OperatingParameters, phys_consts::PhysicalCon
     p.D_L = phys_consts.γ₁ * sorb_params.Dₘ + phys_consts.γ₂ * sorb_params.dₚ * p.u_feed / sorb_params.ε_bed
     p.C_gas_feed = p.c_CO2_feed * phys_consts.Cₚ_CO2 + p.c_H2O_feed * phys_consts.Cₚ_H2O + p.c_N2_feed * phys_consts.Cₚ_N2
     p.K_L = p.D_L * p.C_gas_feed
+
     return nothing
 end
 
@@ -126,6 +128,7 @@ function GAB_isotherm_H2O_Tfunction_Resins(T, p_H2O)
     x = p_H2O / Psat_H2O(T - 273)
 
     q_star = qm * k * c * x / ((1 - k * x) * (1 + (c - 1) * k * x))
+
     q_star
 end
 
@@ -172,7 +175,7 @@ function Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O)
     if t ≥ 0
         if (b * p_CO2_safe * 1e-5) < 0
             @show b.value
-            @show q_H2O
+            @show q_H2O.value
             @show p_CO2_safe.value
         end
         q_star = ns * b * p_CO2 * 1e-5 / (1 + (b * p_CO2_safe * 1e-5) ^ t) ^ (1/t)
