@@ -33,7 +33,8 @@ sorb_params = SorbentParams(
     Dₘ = 1.3e-5,
     C_solid = 1580,
     q_star_CO2 = (T, R, p_CO2, q_H2O) -> Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O, isotherm_params),
-    q_star_H2O = GAB_isotherm_H2O_Tfunction_Resins
+    q_star_H2O = GAB_isotherm_H2O_Tfunction_Resins,
+    pho_bulk_packing = 528
 )
 
 RH=0.55
@@ -91,76 +92,126 @@ cycle_steps = [adsorption, heating, desorption, cooling, pressurization]
 num_cycles = 4
 @time sol, index_data = run_simulation(;N=10, cycle_steps, col_params, sorb_params, num_cycles)
 
+output = post_process(sol, index_data, cycle_steps)
+@show output
+
 # Compare plots with digitized data
 using CSV
 using DataFrames
+using Plots
 
-duration_per_cycle = sum([s.duration for s in cycle_steps])
-last_cycle = duration_per_cycle*(num_cycles - 1) : duration_per_cycle*num_cycles
-df = CSV.File("test_cases/Young_2021/pressure.csv") |> DataFrame
-p = plot(df[:, :x], df[:, " y"] .* 1e5, label="Young")
-plot!([sol(t)[index_data.ip, end] for t in last_cycle], label="Julia Simulation")
-xlabel!("Time (s)")
-ylabel!("Pressure (Pa)")
-savefig(p, "test_cases/Young_2021/figures/pressure.png")
+# duration_per_cycle = sum([s.duration for s in cycle_steps])
+# last_cycle = duration_per_cycle*(num_cycles - 1) : duration_per_cycle*num_cycles
+# df = CSV.File("test_cases/Young_2021/pressure.csv") |> DataFrame
+# p = plot(df[:, :x], df[:, " y"] .* 1e5, label="Young")
+# plot!([sol(t)[index_data.ip, end] for t in last_cycle], label="Julia Simulation")
+# xlabel!("Time (s)")
+# ylabel!("Pressure (Pa)")
+# savefig(p, "test_cases/Young_2021/figures/pressure.png")
 
-df = CSV.File("test_cases/Young_2021/qco2.csv") |> DataFrame
-p = plot(df[:, :x], df[:, " y"], label="Young")
-plot!([sol(t)[index_data.iq_CO2, end] for t in last_cycle], label="Julia Simulation")
-xlabel!("Time (s)")
-ylabel!("q CO2")
-savefig(p, "test_cases/Young_2021/figures/qco2.png")
+# df = CSV.File("test_cases/Young_2021/qco2.csv") |> DataFrame
+# p = plot(df[:, :x], df[:, " y"], label="Young")
+# plot!([sol(t)[index_data.iq_CO2, end] for t in last_cycle], label="Julia Simulation")
+# xlabel!("Time (s)")
+# ylabel!("q CO2")
+# savefig(p, "test_cases/Young_2021/figures/qco2.png")
 
-df = CSV.File("test_cases/Young_2021/qh2o.csv") |> DataFrame
-p = plot(df[:, :x], df[:, " y"], label="Young")
-plot!([sol(t)[index_data.iq_H2O, end] for t in last_cycle], label="Julia Simulation")
-xlabel!("Time (s)")
-ylabel!("q H2O")
-savefig(p, "test_cases/Young_2021/figures/qh2o.png")
+# df = CSV.File("test_cases/Young_2021/qh2o.csv") |> DataFrame
+# p = plot(df[:, :x], df[:, " y"], label="Young")
+# plot!([sol(t)[index_data.iq_H2O, end] for t in last_cycle], label="Julia Simulation")
+# xlabel!("Time (s)")
+# ylabel!("q H2O")
+# savefig(p, "test_cases/Young_2021/figures/qh2o.png")
 
-df = CSV.File("test_cases/Young_2021/yco2.csv") |> DataFrame
-p = plot(df[:, :x], df[:, " y"], label="Young")
-plot!([sol(t)[index_data.iCO2, end] / (sol(t)[index_data.iN2, end] + sol(t)[index_data.iH2O, end] + sol(t)[index_data.iCO2, end]) for t in last_cycle], label="Julia Simulation")
-xlabel!("Time (s)")
-ylabel!("y CO2")
-savefig(p, "test_cases/Young_2021/figures/yco2.png")
+# df = CSV.File("test_cases/Young_2021/yco2.csv") |> DataFrame
+# p = plot(df[:, :x], df[:, " y"], label="Young")
+# plot!([sol(t)[index_data.iCO2, end] / (sol(t)[index_data.iN2, end] + sol(t)[index_data.iH2O, end] + sol(t)[index_data.iCO2, end]) for t in last_cycle], label="Julia Simulation")
+# xlabel!("Time (s)")
+# ylabel!("y CO2")
+# savefig(p, "test_cases/Young_2021/figures/yco2.png")
 
-df = CSV.File("test_cases/Young_2021/T.csv") |> DataFrame
-p = plot(df[:, :x], df[:, " y"], label="Young")
-plot!([sol(t)[index_data.iT, end] for t in last_cycle], label="Julia Simulation")
-xlabel!("Time (s)")
-ylabel!("Temperature")
-savefig(p, "test_cases/Young_2021/figures/T.png")
+# df = CSV.File("test_cases/Young_2021/T.csv") |> DataFrame
+# p = plot(df[:, :x], df[:, " y"], label="Young")
+# plot!([sol(t)[index_data.iT, end] for t in last_cycle], label="Julia Simulation")
+# xlabel!("Time (s)")
+# ylabel!("Temperature")
+# savefig(p, "test_cases/Young_2021/figures/T.png")
 
 using XLSX
-df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_ads_cycle3.xlsx", 1) |> DataFrame
-xs = [parse(Float64, t) for t in names(df)]
-p = plot(xs, Vector(df[10, :]), label="Python simulation")
-plot!([sol(t)[index_data.iCO2, end] for t in last_cycle[1]:(last_cycle[1] + adsorption.duration)], label="Julia simulation")
-ylabel!("Concentration of CO2")
-title!("Adsorption")
-savefig(p, "test_cases/Python_sim_Young/figures/ads_co2.png")
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_ads_cycle3.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# plot!([sol(t)[index_data.iCO2, end] for t in last_cycle[1]:(last_cycle[1] + adsorption.duration)], label="Julia simulation")
+# ylabel!("Concentration of CO2")
+# title!("Adsorption")
+# savefig(p, "test_cases/Python_sim_Young/figures/ads_co2_cycle3.png")
 
-df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_heating_cycle3.xlsx", 1) |> DataFrame
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_heating_cycle3.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Heating")
+# plot!([sol(t)[index_data.iCO2, end] for t in (last_cycle[1] + adsorption.duration):(last_cycle[1] + adsorption.duration + heating.duration)], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/heating_co2_cycle3.png")
+
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_des_cycle3.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Desorption")
+# plot!([sol(t)[index_data.iCO2, end] for t in (last_cycle[1] + adsorption.duration+heating.duration):(last_cycle[1] + adsorption.duration + heating.duration+desorption.duration)], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/des_co2_cycle3.png")
+
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_cooling_cycle3.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Cooling")
+# plot!([sol(t)[index_data.iCO2, end] for t in (last_cycle[1] + adsorption.duration+heating.duration+desorption.duration):(last_cycle[1] + adsorption.duration + heating.duration+desorption.duration+cooling.duration)], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/cooling_co2_cycle3.png")
+
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_ads_cycle0.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Adsorption")
+# plot!([sol(t)[index_data.iCO2, end] for t in 0:adsorption.duration], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/ads_co2_cycle0.png")
+
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_heating_cycle0.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Heating")
+# plot!([sol(t)[index_data.iCO2, end] for t in adsorption.duration:(adsorption.duration + heating.duration)], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/heating_co2_cycle0.png")
+
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_des_cycle0.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Desorption")
+# plot!([sol(t)[index_data.iCO2, end] for t in (adsorption.duration + heating.duration):(adsorption.duration + heating.duration + desorption.duration)], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/des_co2_cycle0.png")
+
+# df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_des_cycle0.xlsx", 1) |> DataFrame
+# xs = [parse(Float64, t) for t in names(df)]
+# p = plot(xs, Vector(df[10, :]), label="Python simulation")
+# ylabel!("Concentration of CO2")
+# title!("Desorption")
+# plot!([sol(t)[index_data.iCO2, end] for t in (adsorption.duration + heating.duration):(adsorption.duration + heating.duration + desorption.duration)], label="Julia simulation")
+# savefig(p, "test_cases/Python_sim_Young/figures/des_co2_cycle0.png")
+
+df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_heating_cycle0.xlsx", 1) |> DataFrame
 xs = [parse(Float64, t) for t in names(df)]
-p = plot(xs, Vector(df[10, :]), label="Python simulation")
+p = plot(xs, Vector(df[70, :]), label="Python simulation")
 ylabel!("Concentration of CO2")
 title!("Heating")
-plot!([sol(t)[index_data.iCO2, end] for t in (last_cycle[1] + adsorption.duration):(last_cycle[1] + adsorption.duration + heating.duration)], label="Julia simulation")
-savefig(p, "test_cases/Python_sim_Young/figures/heating_co2.png")
+plot!([sol(t)[index_data.iT, end] for t in (adsorption.duration):(adsorption.duration + heating.duration)], label="Julia simulation")
+savefig(p, "test_cases/Python_sim_Young/figures/heating_T_cycle0.png")
 
-df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_des_cycle3.xlsx", 1) |> DataFrame
 xs = [parse(Float64, t) for t in names(df)]
-p = plot(xs, Vector(df[10, :]), label="Python simulation")
+p = plot(xs, Vector(df[61, :]), label="Python simulation")
 ylabel!("Concentration of CO2")
-title!("Desorption")
-plot!([sol(t)[index_data.iCO2, end] for t in (last_cycle[1] + adsorption.duration+heating.duration):(last_cycle[1] + adsorption.duration + heating.duration+desorption.duration)], label="Julia simulation")
-savefig(p, "test_cases/Python_sim_Young/figures/des_co2.png")
-
-df = XLSX.readtable("test_cases/Python_sim_Young/x_sol_cooling_cycle3.xlsx", 1) |> DataFrame
-xs = [parse(Float64, t) for t in names(df)]
-p = plot(xs, Vector(df[10, :]), label="Python simulation")
-ylabel!("Concentration of CO2")
-title!("Cooling")
-plot!([sol(t)[index_data.iCO2, end] for t in (last_cycle[1] + adsorption.duration+heating.duration+desorption.duration):(last_cycle[1] + adsorption.duration + heating.duration+desorption.duration+cooling.duration)], label="Julia simulation")
-savefig(p, "test_cases/Python_sim_Young/figures/cooling_co2.png")
+title!("Heating")
+plot!([sol(t)[index_data.iT, 1] for t in (adsorption.duration):(adsorption.duration + heating.duration)], label="Julia simulation")

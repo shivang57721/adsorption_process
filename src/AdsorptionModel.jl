@@ -1,10 +1,8 @@
 # Simulation of adsorption equations with VoronoiFVM.jl
 
 using DifferentialEquations
-using Sundials
 using VoronoiFVM
 using LinearAlgebra
-using Plots
 include("params.jl")
 
 phys_consts = PhysicalConstants()
@@ -183,8 +181,40 @@ function boutflow(y, u, edge, data)
                     u[data.iN2, outflownode(edge)] * Cₚ_N2
 
             y[data.iT]   = -vh * C_gas * u[data.iT, outflownode(edge)]
+            
+            if params.step_name == Desorption
+                update_accumulators!(edge.time, vh, y, data)
+            end
         end
     end
+end
+
+function update_accumulators!(t, vh, y, data)
+    # dt since last call
+    if t == data.purity_data.last_t
+        data.purity_data.last_t = t
+        return
+    end
+    dt = t - data.purity_data.last_t
+
+    data.purity_data.accum_Fco2 += - y[data.iCO2] * dt
+    data.purity_data.accum_Fn2 += - y[data.iN2] * dt
+    data.purity_data.accum_Fh2o += - y[data.iH2O] * dt
+    data.purity_data.last_t = t
+end
+
+Base.@kwdef mutable struct PurityData
+    last_t::Float64 = 0.0
+    accum_Fco2::Float64 = 0.0
+    accum_Fn2::Float64 = 0.0
+    accum_Fh2o::Float64 = 0.0
+end
+
+function reset_params!(purity_data::PurityData)
+    purity_data.last_t = 0.0
+    purity_data.accum_Fco2 = 0.0
+    purity_data.accum_Fn2 = 0.0
+    purity_data.accum_Fh2o = 0.0
 end
 
 Base.@kwdef struct AdsorptionData
@@ -203,6 +233,7 @@ Base.@kwdef struct AdsorptionData
     step_params::OperatingParameters
     col_params::ColumnParams
     sorb_params::SorbentParams
+    purity_data::PurityData
 end
 
 function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_params=SorbentParams(), num_cycles=1)
@@ -211,7 +242,7 @@ function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_par
     end
 
     # --- System Initialization (only done once) ---
-    data = AdsorptionData(; step_params=deepcopy(cycle_steps[1]), col_params, sorb_params)
+    data = AdsorptionData(; step_params=deepcopy(cycle_steps[1]), col_params, sorb_params, purity_data = PurityData())
     X = range(0, col_params.L, length=N)
     grid = VoronoiFVM.Grid(X)
     sys = VoronoiFVM.System(
@@ -242,6 +273,7 @@ function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_par
     u_current = inival
 
     for i in 1:num_cycles
+        reset_params!(data.purity_data)
     for step in cycle_steps
         println("Running step $(step.step_name)")
         if step.step_name == PressurizationReset # Doesn't work currently
@@ -262,15 +294,8 @@ function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_par
         cb = nothing
         if step.step_name == Heating && step.ΔT !== NaN
             @show step.ΔT
-            function stop_condition(u, t, integrator)
-                T_values = view(u, data.iT, :)
-                return maximum(T_values) - (step.T_amb + step.ΔT)
-            end
-
-            function stop_affect!(integrator)
-                terminate!(integrator)
-            end
-            cb = ContinuousCallback(stop_condition, stop_affect!) 
+            stop_condition(u, t, integrator) = u[data.iT, end] ≥ (step.T_amb + step.ΔT)
+            cb = DiscreteCallback(stop_condition, terminate!)
         end
 
         odesol = solve(problem, FBDF(), callback=cb)
@@ -281,7 +306,6 @@ function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_par
         u_current = odesol.u[end]
     end
     end
-
     # --- Generalized Solution Interpolation Function ---
     # Pre-calculate the end time of each step
     end_times = cumsum(repeat([s.duration for s in cycle_steps], num_cycles))
@@ -294,6 +318,26 @@ function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_par
     end
 
     return sol, data
+end
+
+function post_process(sol, data, cycle_steps)
+    desorption = cycle_steps[3]
+    total_time = sum([step.duration for step in cycle_steps])
+
+    F_total = data.purity_data.accum_Fco2 + data.purity_data.accum_Fh2o + data.purity_data.accum_Fn2
+    purity_CO2 = data.purity_data.accum_Fco2 / F_total
+    purity_N2O = data.purity_data.accum_Fn2 / F_total
+    purity_H2O = data.purity_data.accum_Fh2o / F_total
+
+    cross_section = π * data.col_params.Rᵢ^2
+    Δx = data.col_params.L / 10
+    working_capacity = (data.purity_data.accum_Fco2 * cross_section / Δx - desorption.u_feed * desorption.c_CO2_feed * desorption.duration) / 
+                    (data.col_params.L * cross_section * data.sorb_params.pho_bulk_packing)
+
+    productivity_TPD = data.purity_data.accum_Fco2 * cross_section / Δx * MW_CO2 * 1e-6 / 
+                        (cross_section * data.col_params.L * (1 - data.sorb_params.ε_bed) * (total_time/3600) / 24)
+
+    (; purity_CO2, purity_N2O, purity_H2O, working_capacity, productivity_TPD)
 end
 
 # t = 3600

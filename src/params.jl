@@ -39,6 +39,8 @@ Base.@kwdef struct SorbentParams # Default params are Lewatit
 
     q_star_CO2::Function = Toth_isotherm_CO2_modified_H2O
     q_star_H2O::Function = GAB_isotherm_H2O_Tfunction_Resins
+
+    pho_bulk_packing::Float64 =  528
 end
 
 # A struct to hold all operating and derived parameters

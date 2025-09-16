@@ -81,7 +81,7 @@ cooling = OperatingParameters(;
             P_out = 0.05e5,
             y_CO2_feed = 0.0,
             y_H2O_feed = 1.0,
-            duration = 400)
+            duration = 800)
 
 pressurization = OperatingParameters(;
                     step_name = Pressurization,
