@@ -37,8 +37,8 @@ Base.@kwdef struct SorbentParams # Default params are Lewatit
     Dₘ::Float64 = 1.3e-5       # Molecular diffusivity of the gas mixture [m² s⁻¹]
     C_solid::Float64 = 1580     # Heat capacity of the solid sorbent [J kg⁻¹ K⁻¹]
 
-    q_star_CO2 = Toth_isotherm_CO2_modified_H2O
-    q_star_H2O = GAB_isotherm_H2O_Tfunction_Resins
+    q_star_CO2::Function = Toth_isotherm_CO2_modified_H2O
+    q_star_H2O::Function = GAB_isotherm_H2O_Tfunction_Resins
 end
 
 # A struct to hold all operating and derived parameters
@@ -52,6 +52,7 @@ mutable struct OperatingParameters
     y_H2O_feed::Float64
     duration::Float64
     step_name::StepType
+    ΔT::Float64
 
     P_out::Float64
     P_out_func::Function
@@ -68,7 +69,7 @@ mutable struct OperatingParameters
     K_L::Float64
     
     # Constructor to ensure derived parameters are always consistent
-    function OperatingParameters(; u_feed, T_feed, T_amb, y_CO2_feed, y_H2O_feed, P_out, duration, step_name)
+    function OperatingParameters(; u_feed, T_feed, T_amb, y_CO2_feed, y_H2O_feed, P_out, duration, step_name, ΔT=NaN)
         # Create a new instance
         p = new()
 
@@ -81,6 +82,7 @@ mutable struct OperatingParameters
         p.y_H2O_feed = y_H2O_feed
         p.duration = duration
         p.step_name = step_name
+        p.ΔT = ΔT
 
         return p
     end
@@ -132,39 +134,36 @@ function GAB_isotherm_H2O_Tfunction_Resins(T, p_H2O)
     q_star
 end
 
-function Toth_isotherm_CO2_modified_H2O_Stampi(T, R, p_CO2, q_H2O)
-    # --- CO2 Isotherm params ---
-    ns0::Float64 = 4.86  # Saturation capacity at T0 [mol kg⁻¹]
-    chi::Float64 = 0.0      # Temperature dependence parameter for saturation capacity [dimensionless]
-    T_ref::Float64 = 298.15    # Reference temperature [K]
-    DH::Float64 = -117798.0 # Adsorption enthalpy [J mol⁻¹]
-    b0::Float64 = 2.85e-16  # Affinity constant at infinite temperature [bar⁻¹]
-    t0::Float64 = 0.209     # Heterogeneity parameter at T0 [dimensionless]
-    alfa::Float64 =  0.523  # Temperature dependence parameter for t [dimensionless]
-
-    gamma::Float64 = -0.137         # CO₂-H₂O interaction parameter for saturation capacity [kg mol⁻¹]
-    beta::Float64 = 5.612           # CO₂-H₂O interaction parameter for affinity [kg mol⁻¹]
+function Toth_isotherm_CO2_modified_H2O_Stampi(T, R, p_CO2, q_H2O, params)
+    ns0 = params.ns0
+    chi = params.chi
+    T_ref = params.T_ref
+    DH = params.DH
+    b0 = params.b0
+    t0 = params.t0
+    alfa = params.alfa
+    gamma = params.gamma
+    beta = params.beta
 
     ns = ns0 * exp(chi*(1 - T / T_ref)) * (1 / (1 - gamma * q_H2O))
-    b = b0 * exp(-DH / R / T) * (1 + beta * q_H2O)
+    b = b0 * exp(-DH / R / T_ref * (T_ref / T - 1)) * (1 + beta * q_H2O)
     t = t0 + alfa * (1 - T_ref / T)
 
     p_CO2_safe = max(eps(eltype(p_CO2)), p_CO2)
 
-    ns * b * p_CO2 * 1e-5 / (1 + (b * p_CO2_safe * 1e-5)^t)^(1/t)
+    ns * b * p_CO2 * 1e-5 / (1 + (b * p_CO2_safe * 1e-5) ^ t) ^ (1/t)
 end
 
-function Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O)
-    ns0::Float64 = 4.86  # Saturation capacity at T0 [mol kg⁻¹]
-    chi::Float64 = 0.0      # Temperature dependence parameter for saturation capacity [dimensionless]
-    T_ref::Float64 = 298.15    # Reference temperature [K]
-    DH::Float64 = -117798.0 # Adsorption enthalpy [J mol⁻¹]
-    b0::Float64 = 2.85e-16  # Affinity constant at infinite temperature [bar⁻¹]
-    t0::Float64 = 0.209     # Heterogeneity parameter at T0 [dimensionless]
-    alfa::Float64 =  0.523  # Temperature dependence parameter for t [dimensionless]
-
-    gamma::Float64 = -0.137         # CO₂-H₂O interaction parameter for saturation capacity [kg mol⁻¹]
-    beta::Float64 = 5.612           # CO₂-H₂O interaction parameter for affinity [kg mol⁻¹]
+function Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O, params)
+    ns0 = params.ns0
+    chi = params.chi
+    T_ref = params.T_ref
+    DH = params.DH
+    b0 = params.b0
+    t0 = params.t0
+    alfa = params.alfa
+    gamma = params.gamma
+    beta = params.beta
 
     ns = ns0 * exp(chi*(1 - T / T_ref)) * (1 / (1 - gamma * q_H2O))
     b = b0 * exp(-DH / R / T) * (1 + beta * q_H2O)
@@ -184,4 +183,16 @@ function Toth_isotherm_CO2_modified_H2O(T, R, p_CO2, q_H2O)
     end
 
     return q_star
+end
+
+function GAB_isotherm_H2O(T, p_H2O, params)
+    Cm = params.Cm
+    Cg = params.Cg
+    K_ads = params.K_ads
+
+    x = p_H2O / Psat_H2O(T-273)
+
+    q_H2O = Cm * Cg * K_ads * x /((1 - K_ads * x) * (1 + (Cg - 1) * K_ads * x))
+
+    return q_H2O
 end

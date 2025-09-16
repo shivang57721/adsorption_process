@@ -1,6 +1,4 @@
-"""
-Simulation of adsorption equations with VoronoiFVM.jl
-"""
+# Simulation of adsorption equations with VoronoiFVM.jl
 
 using DifferentialEquations
 using Sundials
@@ -10,8 +8,6 @@ using Plots
 include("params.jl")
 
 phys_consts = PhysicalConstants()
-col_params = ColumnParams()
-sorb_params = SorbentParams()
 
 # Unpack phys_consts
 const R = phys_consts.R
@@ -26,37 +22,19 @@ const MW_CO2 = phys_consts.MW_CO2
 const MW_H2O = phys_consts.MW_H2O
 const MW_N2  = phys_consts.MW_N2
 
-# Unpack col_params
-const Rᵢ = col_params.Rᵢ
-const Rₒ = col_params.Rₒ
-const L = col_params.L
-const h_L = col_params.h_L
-const h_W = col_params.h_W
-const a_wall =  π * (Rₒ^2 - Rᵢ^2)
-
-# Unpack sorb_params
-const ε_bed = sorb_params.ε_bed
-const ε_total = sorb_params.ε_total
-const dₚ = sorb_params.dₚ
-const ρ_bed = sorb_params.ρ_bed
-const ρ_particle = sorb_params.ρ_particle
-const k_CO2 = sorb_params.k_CO2
-const k_H2O = sorb_params.k_H2O
-const ΔH_CO2 = sorb_params.ΔH_CO2
-const ΔH_H2O = sorb_params.ΔH_H2O
-const Dₘ = sorb_params.Dₘ
-const C_solid = sorb_params.C_solid
-
-q_star_H2O = sorb_params.q_star_H2O
-q_star_CO2 = sorb_params.q_star_CO2
-
 darcy_velocity(u, data) = begin
+    ε_bed = data.sorb_params.ε_bed
+    dₚ = data.sorb_params.dₚ
+
     k = - 150μ * (1 - ε_bed)^2 / (ε_bed^3 * dₚ^2)
     1/k * (u[data.ip, 2] - u[data.ip, 1])
 end
 
 ergun_velocity(u, data) = begin
-    params = data.params
+    ε_bed = data.sorb_params.ε_bed
+    dₚ = data.sorb_params.dₚ
+    params = data.step_params
+
     ρ_gas = params.P_out / (R * params.T_amb) * (params.y_CO2_feed * MW_CO2 + params.y_H2O_feed * MW_H2O + params.y_N2_feed * MW_N2) * 1e-3
     b = 150μ * (1 - ε_bed)/(dₚ * 1.75 * ρ_gas)
     c = ε_bed^ 3 * dₚ / (1.75 * ρ_gas * (1 - ε_bed))
@@ -65,7 +43,9 @@ ergun_velocity(u, data) = begin
 end
 
 function flux_exponential(f, u, edge, data)
-    params = data.params
+    ε_bed = data.sorb_params.ε_bed
+    params = data.step_params
+    
     vh = ergun_velocity(u, data)
 
     # --- Calculate effective dispersion and Péclet number ---
@@ -95,6 +75,10 @@ function flux_exponential(f, u, edge, data)
 end
 
 function storage(y, u, node, data)
+    ε_total = data.sorb_params.ε_total
+    C_solid = data.sorb_params.C_solid
+    ρ_bed = data.sorb_params.ρ_bed
+
     y[data.iN2]  = ε_total * u[data.iN2]
     y[data.iCO2] = ε_total * u[data.iCO2]
     y[data.iH2O] = ε_total * u[data.iH2O]
@@ -110,8 +94,23 @@ function storage(y, u, node, data)
 end
 
 function reaction(y, u, node, data)
-    params = data.params
-    # P = (c_N2 + c_CO2 + c_H2O) * R * T
+    Rᵢ = data.col_params.Rᵢ
+    Rₒ = data.col_params.Rₒ
+    h_L = data.col_params.h_L
+    h_W = data.col_params.h_W
+    a_wall =  π * (Rₒ^2 - Rᵢ^2)
+
+    ρ_bed = data.sorb_params.ρ_bed
+    k_CO2 = data.sorb_params.k_CO2
+    k_H2O = data.sorb_params.k_H2O
+    ΔH_CO2 = data.sorb_params.ΔH_CO2
+    ΔH_H2O = data.sorb_params.ΔH_H2O
+
+    q_star_H2O = data.sorb_params.q_star_H2O
+    q_star_CO2 = data.sorb_params.q_star_CO2
+
+    params = data.step_params
+
     c_total_node = u[data.iN2] + u[data.iCO2] + u[data.iH2O]
     y[data.ip] = u[data.ip] - c_total_node * R * u[data.iT]
 
@@ -135,7 +134,7 @@ function reaction(y, u, node, data)
 end
 
 function bcondition(y, u, bnode, data)
-    params = data.params
+    params = data.step_params
     
     # Inlet feed flow boundary conditions
     boundary_neumann!(y, u, bnode; species=data.iN2, region=data.Γ_in, value = params.u_feed * params.c_N2_feed)
@@ -144,16 +143,18 @@ function bcondition(y, u, bnode, data)
     boundary_neumann!(y, u, bnode; species=data.iT, region=data.Γ_in, value = params.u_feed * params.C_gas_feed * params.T_feed)
 
     # Dirichlet boundary conditions for Pressure
-    if params.step_name == Pressurization
+    if params.step_name == Adsorption
+        boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out)
+    elseif params.step_name == Pressurization
         boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_in, value = params.P_out_func(bnode.time))
-    elseif params.step_name != Cooling
+    elseif params.step_name == Heating || params.step_name == Desorption
         boundary_dirichlet!(y, u, bnode; species=data.ip, region=data.Γ_out, value = params.P_out_func(bnode.time))
     end
 end
 
 # Outflow boundary conditions
 function boutflow(y, u, edge, data)
-    params = data.params
+    params = data.step_params
     if params.step_name == Cooling
         # Both sides are closed
         return nothing
@@ -167,7 +168,7 @@ function boutflow(y, u, edge, data)
             y[data.iCO2]  = -vh * params.c_CO2_feed
             y[data.iH2O]  = -vh * params.c_H2O_feed
 
-            y[data.iT]   = -vh * params.C_gas_feed * params.T_feed
+            y[data.iT]  = -vh * params.C_gas_feed * params.T_feed
         end
     else
         # Right boundary is open
@@ -199,17 +200,19 @@ Base.@kwdef struct AdsorptionData
     Γ_in = 1
     Γ_out = 2
 
-    params::OperatingParameters
+    step_params::OperatingParameters
+    col_params::ColumnParams
+    sorb_params::SorbentParams
 end
 
-function run_simulation(; N=10, cycle_steps, num_cycles=1)
+function run_simulation(; N=10, cycle_steps, col_params=ColumnParams(), sorb_params=SorbentParams(), num_cycles=1)
     for step in cycle_steps
         update_derived_params!(step, phys_consts, sorb_params)
     end
 
     # --- System Initialization (only done once) ---
-    data = AdsorptionData(; params=deepcopy(cycle_steps[1]))
-    X = range(0, L, length=N)
+    data = AdsorptionData(; step_params=deepcopy(cycle_steps[1]), col_params, sorb_params)
+    X = range(0, col_params.L, length=N)
     grid = VoronoiFVM.Grid(X)
     sys = VoronoiFVM.System(
         grid;
@@ -238,9 +241,8 @@ function run_simulation(; N=10, cycle_steps, num_cycles=1)
     solutions = []
     u_current = inival
 
-    all_steps = repeat(cycle_steps, num_cycles)
-
-    for step in all_steps
+    for i in 1:num_cycles
+    for step in cycle_steps
         println("Running step $(step.step_name)")
         if step.step_name == PressurizationReset # Doesn't work currently
             u_current[data.ip, :]      .= step.P_out
@@ -253,21 +255,36 @@ function run_simulation(; N=10, cycle_steps, num_cycles=1)
         end
 
         step.P_out_func = t -> step.P_out + (u_current[data.ip, end] - step.P_out) * exp(- 0.11 * t)
-        copy_params!(data.params, step)
+        copy_params!(data.step_params, step)
 
         problem = ODEProblem(VoronoiFVM.SystemState(sys), u_current, (0, step.duration))
-        # odesol = solve(problem, Rodas5P(), reltol=1e-5, abstol=1e-5)
-        odesol = solve(problem, FBDF())#, reltol = 1e-8, abstol = 1e-8)
+
+        cb = nothing
+        if step.step_name == Heating && step.ΔT !== NaN
+            @show step.ΔT
+            function stop_condition(u, t, integrator)
+                T_values = view(u, data.iT, :)
+                return maximum(T_values) - (step.T_amb + step.ΔT)
+            end
+
+            function stop_affect!(integrator)
+                terminate!(integrator)
+            end
+            cb = ContinuousCallback(stop_condition, stop_affect!) 
+        end
+
+        odesol = solve(problem, FBDF(), callback=cb)
 
         push!(solutions, odesol)
         
         # Update state for the next step
         u_current = odesol.u[end]
     end
+    end
 
     # --- Generalized Solution Interpolation Function ---
     # Pre-calculate the end time of each step
-    end_times = cumsum([s.duration for s in all_steps])
+    end_times = cumsum(repeat([s.duration for s in cycle_steps], num_cycles))
     start_times = start_times = [0; end_times[1:end-1]]
     
     function sol(t)
